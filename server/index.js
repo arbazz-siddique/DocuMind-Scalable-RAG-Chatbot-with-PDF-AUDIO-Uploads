@@ -86,7 +86,7 @@ app.get('/chat', async (req,res)=>{
         });
         
         const retriever = vectorStore.asRetriever({
-            k: 6,  // Top 4 relevant docs for better context
+            k: 8,  // Top 4 relevant docs for better context
         });
         
         // Retrieve relevant docs
@@ -102,12 +102,12 @@ app.get('/chat', async (req,res)=>{
         const llm = new ChatGoogleGenerativeAI({
             model: "gemini-2.0-flash",  // Free tier model (fast, high-quality)
             apiKey: process.env.GOOGLE_API_KEY,
-            maxTokens: 500,  // Allow longer responses (free tier supports)
-            temperature: 0.3,  // Lower for more focused, detailed output
+            maxTokens: 1500,  // Increased for full code extraction
+            temperature: 0.1,  // Very low for exact reproduction
         });
         
         // Q&A Prompt Template (tuned for Gemini: concise, relevant)
-        const promptTemplate = `You are a helpful assistant answering questions about PDFs. Use only the following context to answer. accurate, and focus on the most relevant details. If the context is irrelevant, say "I don't have info on that yet—upload a relevant PDF!".
+        const promptTemplate = `You are a helpful assistant answering questions about PDFs. Use only the following context to answer. If the query asks for "full code" or "code from page X," extract and provide the exact full code snippet from the context—include all lines, formatting, indentation, comments, and tags without summarizing, omitting, or altering anything. Quote the code in a markdown block. For other queries, be detailed and comprehensive, explaining with examples from the context".
 
         Context: {context}
 

@@ -77,7 +77,8 @@ const worker = new Worker(
 
       // 4️⃣ Initialize Qdrant
       const qClient = new QdrantClient({ 
-        url: process.env.QDRANT_URL 
+        url: process.env.QDRANT_URL ,
+        apiKey:process.env.QDRANT_API_KEY
       });
       
       const collectionName = 'pdf-docs';
@@ -144,8 +145,11 @@ const worker = new Worker(
   {
     concurrency: 1,
     connection: { 
-      host: process.env.REDIS_HOST ,
-      port: process.env.REDIS_PORT 
+     host: process.env.REDIS_HOST,
+      port: Number(process.env.REDIS_PORT),
+      username: process.env.REDIS_USERNAME,
+      password: process.env.REDIS_PASSWORD,
+      tls: {} // Upstash requires TLS
     }
   }
 );

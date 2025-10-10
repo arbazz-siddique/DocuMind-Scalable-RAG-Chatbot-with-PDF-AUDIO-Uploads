@@ -9,11 +9,21 @@ import { HuggingFaceInferenceEmbeddings } from "@langchain/community/embeddings/
 import { QdrantVectorStore } from "@langchain/qdrant";
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { ChatPromptTemplate } from "@langchain/core/prompts";
+import IORedis from "ioredis";
+const connection = new IORedis(process.env.REDIS_URL ,{
+  tls: {}, // required for Upstash (TLS)
+});
 
-const pdfQueue = new Queue("file-upload-queue", { connection:{ host:'localhost', port:6379 } });
-const audioQueue = new Queue("audio-upload-queue", { connection:{ host:'localhost', port:6379 } });
+// ✅ BullMQ Queues
+const pdfQueue = new Queue("file-upload-queue", { connection });
+const audioQueue = new Queue("audio-upload-queue", { connection });
 
-const client = new QdrantClient({ url: process.env.QDRANT_URL });
+// ✅ Qdrant Client with API key support
+const client = new QdrantClient({
+  url: process.env.QDRANT_URL,
+  apiKey: process.env.QDRANT_API_KEY,
+});
+
 const pdfCollectionName = 'pdf-docs';
 const audioCollectionName = 'audio-docs';
 

@@ -47,6 +47,9 @@ importers:
       fs-extra:
         specifier: ^11.3.2
         version: 11.3.2
+      ioredis:
+        specifier: ^5.8.1
+        version: 5.8.1
       langchain:
         specifier: ^0.3.35
         version: 0.3.35(@langchain/core@0.3.78(openai@5.12.2(ws@8.18.3)(zod@3.25.76)))(@langchain/google-genai@0.2.18(@langchain/core@0.3.78(openai@5.12.2(ws@8.18.3)(zod@3.25.76))))(axios@1.12.2)(openai@5.12.2(ws@8.18.3)(zod@3.25.76))(ws@8.18.3)
@@ -2388,7 +2391,7 @@ snapshots:
       isstream: 0.1.2
       jsonwebtoken: 9.0.2
       mime-types: 2.1.35
-      retry-axios: 2.6.0(axios@1.12.2)
+      retry-axios: 2.6.0(axios@1.12.2(debug@4.4.3))
       tough-cookie: 4.1.4
     transitivePeerDependencies:
       - supports-color
@@ -2732,7 +2735,7 @@ snapshots:
 
   requires-port@1.0.0: {}
 
-  retry-axios@2.6.0(axios@1.12.2):
+  retry-axios@2.6.0(axios@1.12.2(debug@4.4.3)):
     dependencies:
       axios: 1.12.2(debug@4.4.3)
 

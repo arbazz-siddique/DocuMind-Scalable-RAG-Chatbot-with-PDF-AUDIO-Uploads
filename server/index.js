@@ -10,6 +10,8 @@ import { QdrantVectorStore } from "@langchain/qdrant";
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { ChatPromptTemplate } from "@langchain/core/prompts";
 import IORedis from "ioredis";
+import fs from 'fs';
+
 const connection = new IORedis(process.env.REDIS_URL ,{
   tls: {}, // required for Upstash (TLS)
 });
@@ -43,20 +45,29 @@ async function ensureCollections() {
 }
 ensureCollections().catch(console.error);
 
+const uploadDir = './uploads';
+if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+
 const storage = multer.diskStorage({
-  destination: (_, file, cb) => cb(null, 'uploads/'),
+  destination: (_, file, cb) => cb(null, uploadDir),
   filename: (_, file, cb) => cb(null, `${Date.now()}-${Math.round(Math.random()*1e9)}-${file.originalname}`)
 });
-const upload = multer({ storage });
+
+const upload = multer({ 
+  storage,
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === 'application/pdf') cb(null, true);
+    else cb(new Error('Only PDF files are allowed'));
+  }
+});
+
 
 const app = express();
 // allow x-session-id header
 
 const corsOptions = {
   origin: [
-    'https://docu-mind-scalable-rag-chatbot-with.vercel.app',
-    'docu-mind-scalable-rag-cha-git-42f7d5-arbazz-siddiques-projects.vercel.app',
-  'docu-mind-scalable-rag-chatbot-with-pdf-audio-upload-f0d8cvmkh.vercel.app',
   'https://docu-mind-scalable-rag-chatbot-with-zeta.vercel.app',
     'http://localhost:3000'
   ],
@@ -75,29 +86,23 @@ app.get('/', (_, res) => res.json({status:'running fine.'}));
 
 
 // PDF upload (unchanged)
-app.post('/upload/pdf', upload.single('pdf'), async (req, res) => {
-  const sessionId = req.headers['x-session-id'] || 'default';
-  
-  // Track PDF uploads by session
-  if (!uploadedPdfFiles[sessionId]) {
-    uploadedPdfFiles[sessionId] = [];
+app.post('/upload/pdf', upload.single('pdf'), async (req,res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No PDF uploaded' });
+    const sessionId = req.headers['x-session-id'] || 'default';
+    if (!uploadedPdfFiles[sessionId]) uploadedPdfFiles[sessionId] = [];
+    uploadedPdfFiles[sessionId].push({
+      path: req.file.path,
+      filename: req.file.originalname,
+      status: 'processing',
+      uploadedAt: Date.now()
+    });
+    await pdfQueue.add('file-ready', { filename: req.file.originalname, path: req.file.path, sessionId });
+    res.json({ message: 'PDF uploaded and processing...' });
+  } catch(err) {
+    console.error('Upload PDF failed:', err);
+    res.status(500).json({ error: err.message });
   }
-  
-  uploadedPdfFiles[sessionId].push({
-    path: req.file.path,
-    filename: req.file.originalname,
-    status: 'processing',
-    uploadedAt: Date.now()
-  });
-
-  await pdfQueue.add('file-ready', {
-    filename: req.file.originalname,
-    destination: req.file.destination,
-    path: req.file.path,
-    sessionId: sessionId  // Add session ID to the job
-  });
-  
-  return res.json({ message: 'PDF uploaded and processing...' });
 });
 
 app.get('/pdf/status', (req, res) => {

@@ -70,6 +70,7 @@ app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
 app.get('/', (_, res) => res.json({status:'running fine.'}));
 
+
 // PDF upload (unchanged)
 app.post('/upload/pdf', upload.single('pdf'), async (req, res) => {
   const sessionId = req.headers['x-session-id'] || 'default';

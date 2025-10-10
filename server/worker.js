@@ -1,28 +1,27 @@
-// worker.js
+// worker.js - UPDATED for base64
 import { Worker } from "bullmq";
 import { HuggingFaceInferenceEmbeddings } from "@langchain/community/embeddings/hf";
 import { QdrantVectorStore } from "@langchain/qdrant";
 import { CharacterTextSplitter } from "@langchain/textsplitters";
 import { QdrantClient } from "@qdrant/js-client-rest";
 import { InferenceClient } from "@huggingface/inference";
-import fs from "fs/promises";
+import { writeFile, unlink } from "fs/promises";
 import { Blob } from "buffer";
 import 'dotenv/config';
 
 // HF client
 const hf = new InferenceClient(process.env.HUGGINGFACEHUB_AUDIO_KEY);
-// console.log("HF client initialized with token:", !!process.env.HUGGINGFACEHUB_AUDIO_KEY ? "YES" : "MISSING!");
 
-// helper to notify server
-async function notifyServerComplete(sessionId, path, filename, transcript, status = 'ready') {
+// helper to notify server - UPDATED
+async function notifyServerComplete(sessionId, filename, transcript, status = 'ready') {
   const serverUrl = process.env.SERVER_URL;
   try {
     await fetch(`${serverUrl}/audio/complete`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId, path, filename, transcript, status })
+      body: JSON.stringify({ sessionId, filename, transcript, status })
     });
-    console.log('Notified server of completion for', path);
+    console.log('Notified server of completion for', filename);
   } catch (err) {
     console.error('Failed to notify server of audio completion:', err);
   }
@@ -48,7 +47,6 @@ async function transcribeWithRetry(audioBlob, maxRetries = 3) {
       const transcriptionResponse = await hf.automaticSpeechRecognition({
         model: currentModel,
         data: audioBlob,
-        // REMOVED: provider: "hf-inference" - Let HF handle provider selection automatically
       });
       
       console.log("Transcription response received for model:", currentModel);
@@ -77,38 +75,39 @@ async function transcribeWithRetry(audioBlob, maxRetries = 3) {
 const worker = new Worker(
   "audio-upload-queue",
   async (job) => {
+    let tempPath = null;
     try {
       console.log("Audio job received:", job.data);
       const data = typeof job.data === "string" ? JSON.parse(job.data) : job.data;
       console.log("Parsed data:", data);
-      const { sessionId, path, filename } = data;
+      const { sessionId, filename, base64Data, mimetype } = data;
 
-      // Validate file exists
-      try {
-        await fs.access(path);
-      } catch (err) {
-        throw new Error(`Audio file not found: ${path}`);
+      if (!base64Data) {
+        throw new Error('No audio data received');
       }
 
-      console.log("Transcribing:", path);
-      const audioBuffer = await fs.readFile(path);
-      console.log("Audio buffer loaded (size:", audioBuffer.length, "bytes)");
+      // Convert base64 to buffer and save temporarily
+      const fileBuffer = Buffer.from(base64Data, 'base64');
+      tempPath = `/tmp/${Date.now()}-${filename}`;
+      await writeFile(tempPath, fileBuffer);
+      console.log("Saved audio to temporary file:", tempPath);
 
       // Check file size (Hugging Face has limits)
-      const fileSizeMB = audioBuffer.length / (1024 * 1024);
-if (fileSizeMB > 50) {
-  const errorMsg = `File too large (${fileSizeMB.toFixed(2)}MB). Maximum size is 50MB. Please use a smaller file.`;
-  await notifyServerComplete(sessionId, path, filename, null, 'failed');
-  throw new Error(errorMsg);
-}
+      const fileSizeMB = fileBuffer.length / (1024 * 1024);
+      if (fileSizeMB > 50) {
+        const errorMsg = `File too large (${fileSizeMB.toFixed(2)}MB). Maximum size is 50MB. Please use a smaller file.`;
+        await notifyServerComplete(sessionId, filename, null, 'failed');
+        throw new Error(errorMsg);
+      }
 
-      const audioBlob = new Blob([audioBuffer], { type: "audio/mpeg" });
+      console.log("Transcribing:", tempPath);
+      const audioBlob = new Blob([fileBuffer], { type: mimetype || "audio/mpeg" });
 
       // Use enhanced transcription with retry logic
       const transcriptionResponse = await transcribeWithRetry(audioBlob, 3);
 
       if (!transcriptionResponse || !transcriptionResponse.text) {
-        await notifyServerComplete(sessionId, path, filename, null, 'failed');
+        await notifyServerComplete(sessionId, filename, null, 'failed');
         throw new Error(`Transcription failed: ${JSON.stringify(transcriptionResponse)}`);
       }
 
@@ -139,13 +138,14 @@ if (fileSizeMB > 50) {
       const splitDocs = await splitter.splitDocuments(docs);
       console.log(`Split into ${splitDocs.length} chunks.`);
 
-console.log('Document metadata:', splitDocs.map(doc => ({
-  contentLength: doc.pageContent.length,
-  metadata: doc.metadata
-})));
+      console.log('Document metadata:', splitDocs.map(doc => ({
+        contentLength: doc.pageContent.length,
+        metadata: doc.metadata
+      })));
+
       // Initialize Qdrant
       const qClient = new QdrantClient({ 
-        url: process.env.QDRANT_URL ,
+        url: process.env.QDRANT_URL,
         apiKey: process.env.QDRANT_API_KEY, 
       });
       
@@ -178,35 +178,33 @@ console.log('Document metadata:', splitDocs.map(doc => ({
       console.log(`All ${splitDocs.length} chunks added to Qdrant!`);
 
       // notify server that processing is done and attach transcript
-      await notifyServerComplete(sessionId, path, filename, transcript, 'ready');
-
-      // delete audio file
-      try {
-        await fs.unlink(path);
-        console.log('Deleted processed audio file:', path);
-      } catch (unlinkErr) {
-        console.warn('Could not delete audio file:', unlinkErr.message);
-      }
+      await notifyServerComplete(sessionId, filename, transcript, 'ready');
 
     } catch (error) {
       console.error("Audio worker failed:", error.message);
       
-      // Extract session info for error notification
-      let sessionId, path, filename;
-      try {
+      // Notify server of failure
+      if (job.data) {
         const data = typeof job.data === "string" ? JSON.parse(job.data) : job.data;
-        sessionId = data.sessionId;
-        path = data.path;
-        filename = data.filename;
-      } catch (parseErr) {
-        console.error('Could not parse job data for error notification');
-      }
-      
-      if (sessionId && path && filename) {
-        await notifyServerComplete(sessionId, path, filename, null, 'failed');
+        const sessionId = data.sessionId;
+        const filename = data.filename;
+        
+        if (sessionId && filename) {
+          await notifyServerComplete(sessionId, filename, null, 'failed');
+        }
       }
       
       throw error; // let BullMQ handle retries
+    } finally {
+      // Clean up temporary file
+      if (tempPath) {
+        try {
+          await unlink(tempPath);
+          console.log('Cleaned up temporary audio file:', tempPath);
+        } catch (unlinkErr) {
+          console.warn('Could not delete temporary audio file:', unlinkErr.message);
+        }
+      }
     }
   },
   {

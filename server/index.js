@@ -198,33 +198,53 @@ app.post('/pdf/complete', (req, res) => {
 // Audio upload - ALSO NEEDS TO BE UPDATED similarly
 app.post('/upload/audio', upload.single('audio'), async (req, res) => {
   try {
+    if (!req.file) return res.status(400).json({ error: 'No audio uploaded' });
+    
     const sessionId = req.headers['x-session-id'] || 'default';
-    if (!uploadedAudioFiles[sessionId]) uploadedAudioFiles[sessionId] = [];
-
-    // Convert audio buffer to base64
+    
+    console.log('📤 Audio upload received:', {
+      sessionId,
+      originalname: req.file.originalname,
+      size: req.file.size,
+      mimetype: req.file.mimetype
+    });
+    
+    // Convert file buffer to base64
     const base64Data = req.file.buffer.toString('base64');
-
-    uploadedAudioFiles[sessionId].push({
+    
+    // Track audio uploads by session
+    if (!uploadedAudioFiles[sessionId]) {
+      uploadedAudioFiles[sessionId] = [];
+    }
+    
+    // Store file info without path (since we're using base64)
+    const fileInfo = {
       filename: req.file.originalname,
       status: 'processing',
       uploadedAt: Date.now()
-    });
+    };
+    
+    uploadedAudioFiles[sessionId].push(fileInfo);
 
-    // Send base64 data to audio queue
+    console.log('📝 Stored audio file info for session:', sessionId, fileInfo);
+    console.log('📊 Current audio files for session:', uploadedAudioFiles[sessionId]);
+
+    // Send base64 data to queue instead of file path
     await audioQueue.add('transcribe-ready', {
       filename: req.file.originalname,
       base64Data: base64Data,
       sessionId: sessionId,
       mimetype: req.file.mimetype
     });
-
-    res.json({ message: 'Audio uploaded and queued for transcription...', status: 'processing' });
+    
+    console.log('✅ Audio job added to queue');
+    
+    return res.json({ message: 'Audio uploaded and processing...', status: 'processing' });
   } catch (err) {
     console.error('Upload audio failed:', err);
     res.status(500).json({ error: err.message });
   }
 });
-
 // Polling endpoint for frontend to see status
 app.get('/audio/status', (req, res) => {
   const sessionId = req.query.sessionId || req.headers['x-session-id'] || 'default';

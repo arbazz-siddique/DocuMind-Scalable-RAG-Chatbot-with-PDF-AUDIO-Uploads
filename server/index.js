@@ -274,7 +274,7 @@ console.log(`Audio ready: ${hasReadyAudio}, PDF ready: ${hasReadyPdf}`);
     console.log(`Selected collection: ${collectionName} (${sourceType}) for session: ${sessionId}`);
 
     const embeddings = new HuggingFaceInferenceEmbeddings({
-      apiKey: process.env.HUGGINGFACEHUB_AUDIO_KEY,
+      apiKey: process.env.HUGGINGFACEHUB_API_TOKEN,
       model: "BAAI/bge-base-en-v1.5",
     });
 

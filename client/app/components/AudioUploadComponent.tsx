@@ -2,13 +2,11 @@
 import { Mic, CheckCircle, XCircle, Loader2, AlertCircle, Volume2 } from 'lucide-react'
 import * as React from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import axios, { AxiosProgressEvent } from 'axios'
 import { useAuthToast } from '@/hooks/useAuthToast'
 
 interface AudioFileStatus {
   filename: string
   status: 'processing' | 'ready' | 'failed'
-  path: string
   transcript?: string
 }
 
@@ -19,7 +17,6 @@ const AudioUploadComponent: React.FC = () => {
   const [isProcessing, setIsProcessing] = React.useState(false)
   const [isFailed, setIsFailed] = React.useState(false)
   const [progress, setProgress] = React.useState(0)
-  // const [uploadTime, setUploadTime] = React.useState<number | null>(null)
   const [errorMessage, setErrorMessage] = React.useState<string>('')
   const { showAuthToast, isSignedIn } = useAuthToast()
 
@@ -37,30 +34,14 @@ const AudioUploadComponent: React.FC = () => {
 
   const sessionId = getSessionId();
 
-  // Upload helper with progress
-  async function uploadAudioFile(file: File) {
-    const formData = new FormData();
-    formData.append('audio', file);
-
-    const uploadResponse = await axios.post(`${process.env.NEXT_PUBLIC_SERVER_URL}/upload/audio`, formData, {
-      headers: { 'x-session-id': sessionId },
-      onUploadProgress: (e: AxiosProgressEvent) => {
-        if (e.total) {
-          const percent = Math.round((e.loaded / e.total) * 100);
-          setProgress(percent);
-        }
-      }
-    });
-
-    console.log(uploadResponse.data.message);
-    return uploadResponse.data;
-  }
-
-  // Poll backend for transcription status
-  async function waitUntilProcessed() {
+  // Poll backend for transcription status - FIXED
+  async function waitUntilProcessed(filename: string) {
     return new Promise<void>((resolve, reject) => {
       const interval = setInterval(async () => {
         try {
+          console.log('🔄 Polling audio status for session:', sessionId);
+          console.log('🔍 Looking for filename:', filename);
+          
           const res = await fetch(
             `${process.env.NEXT_PUBLIC_SERVER_URL}/audio/status?sessionId=${encodeURIComponent(sessionId)}`
           );
@@ -72,44 +53,48 @@ const AudioUploadComponent: React.FC = () => {
           const data = await res.json();
           const files: AudioFileStatus[] = data.files || [];
           
-          const currentFile = files.find(f => 
-            f.filename === uploadedAudio?.name || 
-            f.path.includes(uploadedAudio?.name || '')
-          );
+          console.log('📊 Full status response:', data);
+          console.log('📁 All files in session:', files);
+
+          // FIXED: Use filename parameter for matching
+          const currentFile = files.find(f => f.filename === filename);
+
+          console.log('✅ Found file:', currentFile);
 
           if (!currentFile) {
-            console.log('File not found in status response');
+            console.log('❌ Audio file not found in status response. Available files:', files.map(f => f.filename));
             return;
           }
 
+          console.log('📋 Current file status:', currentFile.status);
+
           if (currentFile.status === 'ready') {
+            console.log('🎉 Audio processing completed!');
             clearInterval(interval);
             setIsProcessing(false);
             setIsUploaded(true);
             setIsFailed(false);
             resolve();
           } else if (currentFile.status === 'failed') {
+            console.log('💥 Audio processing failed');
             clearInterval(interval);
             setIsProcessing(false);
             setIsUploaded(false);
             setIsFailed(true);
             setErrorMessage('Audio processing failed. File might be too large or corrupted.');
             reject(new Error('Audio processing failed'));
+          } else {
+            console.log('⏳ Audio still processing...');
           }
-          // Continue polling if still processing
         } catch (err) {
-          console.error('Status poll error', err);
-          clearInterval(interval);
-          setIsProcessing(false);
-          setIsUploaded(false);
-          setIsFailed(true);
-          setErrorMessage('Error checking processing status');
-          reject(err);
+          console.error('❌ Audio status poll error', err);
+          // Don't clear interval on temporary errors, keep polling
         }
       }, 3000);
 
       // Timeout after 10 minutes
       setTimeout(() => {
+        console.log('⏰ Audio processing timeout');
         clearInterval(interval);
         setIsProcessing(false);
         setIsUploaded(false);
@@ -121,11 +106,12 @@ const AudioUploadComponent: React.FC = () => {
   }
 
   const handleFileUploadButtonClick = () => {
-     if (!isSignedIn) {
+    if (!isSignedIn) {
       showAuthToast('upload audio files')
       return
     }
-     const el = document.createElement('input');
+    
+    const el = document.createElement('input');
     el.type = 'file';
     el.accept = 'audio/*';
 
@@ -139,32 +125,58 @@ const AudioUploadComponent: React.FC = () => {
           return;
         }
 
+        console.log('📤 Starting upload for file:', file.name);
+        console.log('📝 File details:', {
+          name: file.name,
+          size: file.size,
+          type: file.type
+        });
+
         setIsUploading(true);
         setProgress(0);
-        // setUploadTime(null);
         setIsUploaded(false);
         setIsProcessing(false);
         setIsFailed(false);
         setErrorMessage('');
 
         try {
-          await uploadAudioFile(file);
-          setUploadedAudio(file);
-          setIsUploading(false);
-          setIsProcessing(true);
-          
-          console.log('Audio uploaded, waiting for processing ⏳');
-          await waitUntilProcessed();
-          
-          console.log('Audio processed successfully ✅');
-        } catch (err) {
-          console.error('Error uploading or processing audio:', err);
-          if (!errorMessage) {
-            setErrorMessage('Upload or processing failed. Please try again.');
+          const formData = new FormData();
+          formData.append('audio', file);
+
+          const res = await fetch(`${process.env.NEXT_PUBLIC_SERVER_URL}/upload/audio`, {
+            method: 'POST',
+            body: formData,
+            headers: {
+              'x-session-id': sessionId
+            }
+          });
+
+          if (res.ok) {
+            const result = await res.json();
+            console.log('✅ Upload successful, server response:', result);
+            
+            setUploadedAudio(file);
+            setIsUploading(false);
+            setIsProcessing(true);
+            
+            console.log('Audio uploaded, waiting for processing ⏳');
+            
+            // FIXED: Pass filename to waitUntilProcessed
+            await waitUntilProcessed(file.name);
+            
+            console.log('Audio processed successfully ✅');
+          } else {
+            const errorText = await res.text();
+            console.error('❌ Upload failed with status:', res.status, 'Response:', errorText);
+            setIsUploading(false);
+            setIsFailed(true);
+            setErrorMessage('Upload failed. Please try again.');
           }
-        } finally {
+        } catch (err) {
+          console.error('❌ Error uploading or processing audio:', err);
           setIsUploading(false);
-          // setUploadTime(null);
+          setIsFailed(true);
+          setErrorMessage('Upload or processing failed. Please try again.');
         }
       }
     });

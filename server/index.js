@@ -55,13 +55,15 @@ const upload = multer({
   storage,
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
   fileFilter: (req, file, cb) => {
-    if (file.mimetype === 'application/pdf') {
+    // Allow both PDF and audio files
+    if (file.mimetype.startsWith('audio/') || file.mimetype === 'application/pdf') {
       cb(null, true);
     } else {
-      cb(new Error('Only PDF files are allowed'));
+      cb(new Error('Only audio and PDF files are allowed'));
     }
   }
 });
+
 
 const app = express();
 // allow x-session-id header
@@ -245,12 +247,30 @@ app.post('/upload/audio', upload.single('audio'), async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
 // Polling endpoint for frontend to see status
 app.get('/audio/status', (req, res) => {
   const sessionId = req.query.sessionId || req.headers['x-session-id'] || 'default';
-  const files = uploadedAudioFiles[sessionId] || [];
-  return res.json({ sessionId, files });
+  let files = uploadedAudioFiles[sessionId] || [];
+  
+  console.log('📊 Audio status check for session:', sessionId);
+  console.log('📁 Current audio files:', files);
+  
+  // Ensure consistent response format
+  files = files.map(file => ({
+    filename: file.filename || 'unknown',
+    status: file.status || 'processing',
+    uploadedAt: file.uploadedAt || Date.now(),
+    updatedAt: file.updatedAt || Date.now(),
+    transcript: file.transcript || null
+  }));
+  
+  return res.json({ 
+    sessionId, 
+    files 
+  });
 });
+
 
 app.post('/audio/complete', (req, res) => {
   try {
@@ -259,6 +279,8 @@ app.post('/audio/complete', (req, res) => {
     if (!sessionId || !filename) {
       return res.status(400).json({ error: 'sessionId and filename required' });
     }
+    
+    console.log('✅ Audio completion received:', { sessionId, filename, status });
     
     // Initialize session array if it doesn't exist
     if (!uploadedAudioFiles[sessionId]) {
@@ -273,15 +295,18 @@ app.post('/audio/complete', (req, res) => {
       arr.push({ 
         filename, 
         status, 
-        transcript, 
+        transcript,
         updatedAt: Date.now() 
       });
+      console.log('📝 Added new audio file to tracking:', filename);
     } else {
       arr[idx].status = status;
-      if (transcript) arr[idx].transcript = transcript;
       arr[idx].updatedAt = Date.now();
+      if (transcript) arr[idx].transcript = transcript;
+      console.log('📝 Updated audio file status:', filename, '->', status);
     }
     
+    console.log(`Audio completion: Session ${sessionId}, File ${filename}, Status: ${status}`);
     return res.json({ ok: true });
   } catch (error) {
     console.error('Error in /audio/complete:', error);

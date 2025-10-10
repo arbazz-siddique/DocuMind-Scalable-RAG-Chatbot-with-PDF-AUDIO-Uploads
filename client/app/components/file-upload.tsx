@@ -36,7 +36,7 @@ const FileUploadComponent: React.FC = () => {
       const interval = setInterval(async () => {
         try {
           const res = await fetch(
-            `http://localhost:8000/pdf/status?sessionId=${encodeURIComponent(sessionId)}`
+            `${process.env.NEXT_PUBLIC_SERVER_URL}/pdf/status?sessionId=${encodeURIComponent(sessionId)}`
           );
           
           if (!res.ok) {
@@ -107,7 +107,7 @@ const FileUploadComponent: React.FC = () => {
           formData.append('pdf', file)
 
           try {
-            const res = await fetch('http://localhost:8000/upload/pdf', {
+            const res = await fetch(`${process.env.NEXT_PUBLIC_SERVER_URL}/upload/pdf`, {
               method: 'POST',
               body: formData,
               headers: {

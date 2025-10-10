@@ -42,7 +42,7 @@ const AudioUploadComponent: React.FC = () => {
     const formData = new FormData();
     formData.append('audio', file);
 
-    const uploadResponse = await axios.post('http://localhost:8000/upload/audio', formData, {
+    const uploadResponse = await axios.post(`${process.env.NEXT_PUBLIC_SERVER_URL}/upload/audio`, formData, {
       headers: { 'x-session-id': sessionId },
       onUploadProgress: (e: AxiosProgressEvent) => {
         if (e.total) {
@@ -62,7 +62,7 @@ const AudioUploadComponent: React.FC = () => {
       const interval = setInterval(async () => {
         try {
           const res = await fetch(
-            `http://localhost:8000/audio/status?sessionId=${encodeURIComponent(sessionId)}`
+            `${process.env.NEXT_PUBLIC_SERVER_URL}/audio/status?sessionId=${encodeURIComponent(sessionId)}`
           );
           
           if (!res.ok) {

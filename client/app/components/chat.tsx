@@ -40,7 +40,7 @@ const ChatComponent: React.FC = () => {
 
     try  {
       const sessionId = localStorage.getItem('sessionId') || 'default';
-      const response = await fetch(`http://localhost:8000/chat?message=${encodeURIComponent(input)}`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_SERVER_URL}/chat?message=${encodeURIComponent(input)}`, {
         method: 'GET',
         headers: {
           'x-session-id': sessionId

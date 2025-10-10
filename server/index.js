@@ -94,6 +94,13 @@ app.post('/upload/pdf', upload.single('pdf'), async (req, res) => {
     
     const sessionId = req.headers['x-session-id'] || 'default';
     
+    console.log('📤 PDF upload received:', {
+      sessionId,
+      originalname: req.file.originalname,
+      size: req.file.size,
+      mimetype: req.file.mimetype
+    });
+    
     // Convert file buffer to base64
     const base64Data = req.file.buffer.toString('base64');
     
@@ -103,11 +110,16 @@ app.post('/upload/pdf', upload.single('pdf'), async (req, res) => {
     }
     
     // Store file info without path (since we're using base64)
-    uploadedPdfFiles[sessionId].push({
+    const fileInfo = {
       filename: req.file.originalname,
       status: 'processing',
       uploadedAt: Date.now()
-    });
+    };
+    
+    uploadedPdfFiles[sessionId].push(fileInfo);
+
+    console.log('📝 Stored file info for session:', sessionId, fileInfo);
+    console.log('📊 Current files for session:', uploadedPdfFiles[sessionId]);
 
     // Send base64 data to queue instead of file path
     await pdfQueue.add('file-ready', {
@@ -116,6 +128,8 @@ app.post('/upload/pdf', upload.single('pdf'), async (req, res) => {
       sessionId: sessionId,
       mimetype: req.file.mimetype
     });
+    
+    console.log('✅ PDF job added to queue');
     
     return res.json({ message: 'PDF uploaded and processing...' });
   } catch (err) {
@@ -127,6 +141,9 @@ app.post('/upload/pdf', upload.single('pdf'), async (req, res) => {
 app.get('/pdf/status', (req, res) => {
   const sessionId = req.query.sessionId || req.headers['x-session-id'] || 'default';
   let files = uploadedPdfFiles[sessionId] || [];
+  
+  console.log('📊 Status check for session:', sessionId);
+  console.log('📁 Current files:', files);
   
   // Ensure consistent response format
   files = files.map(file => ({

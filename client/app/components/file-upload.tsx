@@ -32,59 +32,72 @@ const FileUploadComponent: React.FC = () => {
   const sessionId = getSessionId();
 
   // Poll backend for PDF processing status - UPDATED
-  async function waitUntilProcessed() {
-    return new Promise<void>((resolve, reject) => {
-      const interval = setInterval(async () => {
-        try {
-          const res = await fetch(
-            `${process.env.NEXT_PUBLIC_SERVER_URL}/pdf/status?sessionId=${encodeURIComponent(sessionId)}`
-          );
-          
-          if (!res.ok) {
-            throw new Error(`HTTP error! status: ${res.status}`);
-          }
-          
-          const data = await res.json();
-          const files: PdfFileStatus[] = data.files || [];
-          
-          // FIXED: Use filename only for matching
-          const currentFile = files.find(f => f.filename === uploadedFile?.name);
+async function waitUntilProcessed() {
+  return new Promise<void>((resolve, reject) => {
+    const interval = setInterval(async () => {
+      try {
+        console.log('🔄 Polling PDF status for session:', sessionId);
+        
+        const res = await fetch(
+          `${process.env.NEXT_PUBLIC_SERVER_URL}/pdf/status?sessionId=${encodeURIComponent(sessionId)}`
+        );
+        
+        if (!res.ok) {
+          throw new Error(`HTTP error! status: ${res.status}`);
+        }
+        
+        const data = await res.json();
+        const files: PdfFileStatus[] = data.files || [];
+        
+        console.log('📊 Full status response:', data);
+        console.log('📁 All files in session:', files);
+        console.log('🔍 Uploaded file name we are looking for:', uploadedFile?.name);
+        console.log('🎯 Session ID:', sessionId);
 
-          if (!currentFile) {
-            console.log('PDF file not found in status response');
-            return;
-          }
+        // FIXED: Use filename only for matching
+        const currentFile = files.find(f => f.filename === uploadedFile?.name);
 
-          if (currentFile.status === 'ready') {
-            clearInterval(interval);
-            setIsProcessing(false);
-            setIsUploaded(true);
-            resolve();
-          } else if (currentFile.status === 'failed') {
-            clearInterval(interval);
-            setIsProcessing(false);
-            setIsUploaded(false);
-            reject(new Error('PDF processing failed'));
-          }
-          // Continue polling if still processing
-        } catch (err) {
-          console.error('PDF status poll error', err);
+        console.log('✅ Found file:', currentFile);
+
+        if (!currentFile) {
+          console.log('❌ PDF file not found in status response. Available files:', files.map(f => f.filename));
+          return; // Continue polling
+        }
+
+        console.log('📋 Current file status:', currentFile.status);
+
+        if (currentFile.status === 'ready') {
+          console.log('🎉 PDF processing completed!');
+          clearInterval(interval);
+          setIsProcessing(false);
+          setIsUploaded(true);
+          resolve();
+        } else if (currentFile.status === 'failed') {
+          console.log('💥 PDF processing failed');
           clearInterval(interval);
           setIsProcessing(false);
           setIsUploaded(false);
-          reject(err);
+          reject(new Error('PDF processing failed'));
+        } else {
+          console.log('⏳ PDF still processing...');
         }
-      }, 2000); // Check every 2 seconds
+        // Continue polling if still processing
+      } catch (err) {
+        console.error('❌ PDF status poll error', err);
+        // Don't clear interval on temporary errors, keep polling
+      }
+    }, 2000); // Check every 2 seconds
 
-      // Timeout after 5 minutes
-      setTimeout(() => {
-        clearInterval(interval);
-        setIsProcessing(false);
-        setIsUploaded(false);
-        reject(new Error('PDF processing timeout'));
-      }, 5 * 60 * 1000);
-    });
-  }
+    // Timeout after 5 minutes
+    setTimeout(() => {
+      console.log('⏰ PDF processing timeout');
+      clearInterval(interval);
+      setIsProcessing(false);
+      setIsUploaded(false);
+      reject(new Error('PDF processing timeout'));
+    }, 5 * 60 * 1000);
+  });
+}
 
   const handleFileUploadButtonClick = () => {
     if (!isSignedIn) {
@@ -96,45 +109,54 @@ const FileUploadComponent: React.FC = () => {
     el.setAttribute('accept', 'application/pdf')
 
     el.addEventListener('change', async () => {
-      if (el.files && el.files.length > 0) {
-        const file = el.files.item(0)
-        if (file) {
-          setIsUploading(true)
-          setIsUploaded(false)
-          setIsProcessing(false)
-          const formData = new FormData()
-          formData.append('pdf', file)
+  if (el.files && el.files.length > 0) {
+    const file = el.files.item(0)
+    if (file) {
+      console.log('📤 Starting upload for file:', file.name);
+      console.log('📝 File details:', {
+        name: file.name,
+        size: file.size,
+        type: file.type
+      });
+      
+      setIsUploading(true)
+      setIsUploaded(false)
+      setIsProcessing(false)
+      const formData = new FormData()
+      formData.append('pdf', file)
 
-          try {
-            const res = await fetch(`${process.env.NEXT_PUBLIC_SERVER_URL}/upload/pdf`, {
-              method: 'POST',
-              body: formData,
-              headers: {
-                'x-session-id': sessionId
-              }
-            })
-
-            if (res.ok) {
-              setUploadedFile(file)
-              setIsUploading(false)
-              setIsProcessing(true)
-              
-              console.log('PDF uploaded, waiting for processing ⏳')
-              await waitUntilProcessed()
-              
-              console.log('PDF processed successfully ✅')
-            } else {
-              console.error('Upload failed ❌')
-              setIsUploading(false)
-            }
-          } catch (err) {
-            console.error('Error uploading file:', err)
-            setIsUploading(false)
+      try {
+        const res = await fetch(`${process.env.NEXT_PUBLIC_SERVER_URL}/upload/pdf`, {
+          method: 'POST',
+          body: formData,
+          headers: {
+            'x-session-id': sessionId
           }
-        }
-      }
-    })
+        })
 
+        if (res.ok) {
+          const result = await res.json();
+          console.log('✅ Upload successful, server response:', result);
+          setUploadedFile(file)
+          setIsUploading(false)
+          setIsProcessing(true)
+          
+          console.log('PDF uploaded, waiting for processing ⏳')
+          await waitUntilProcessed()
+          
+          console.log('PDF processed successfully ✅')
+        } else {
+          const errorText = await res.text();
+          console.error('❌ Upload failed with status:', res.status, 'Response:', errorText);
+          setIsUploading(false)
+        }
+      } catch (err) {
+        console.error('❌ Error uploading file:', err)
+        setIsUploading(false)
+      }
+    }
+  }
+})
     el.click()
   }
 

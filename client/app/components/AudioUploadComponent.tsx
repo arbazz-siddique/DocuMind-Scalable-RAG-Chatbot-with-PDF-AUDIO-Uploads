@@ -19,7 +19,7 @@ const AudioUploadComponent: React.FC = () => {
   const [isProcessing, setIsProcessing] = React.useState(false)
   const [isFailed, setIsFailed] = React.useState(false)
   const [progress, setProgress] = React.useState(0)
-  const [uploadTime, setUploadTime] = React.useState<number | null>(null)
+  // const [uploadTime, setUploadTime] = React.useState<number | null>(null)
   const [errorMessage, setErrorMessage] = React.useState<string>('')
   const { showAuthToast, isSignedIn } = useAuthToast()
 
@@ -141,7 +141,7 @@ const AudioUploadComponent: React.FC = () => {
 
         setIsUploading(true);
         setProgress(0);
-        setUploadTime(null);
+        // setUploadTime(null);
         setIsUploaded(false);
         setIsProcessing(false);
         setIsFailed(false);
@@ -164,7 +164,7 @@ const AudioUploadComponent: React.FC = () => {
           }
         } finally {
           setIsUploading(false);
-          setUploadTime(null);
+          // setUploadTime(null);
         }
       }
     });

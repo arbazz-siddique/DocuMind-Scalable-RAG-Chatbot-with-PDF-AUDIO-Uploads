@@ -56,7 +56,8 @@ const corsOptions = {
   origin: [
     'https://docu-mind-scalable-rag-chatbot-with.vercel.app',
     'docu-mind-scalable-rag-cha-git-42f7d5-arbazz-siddiques-projects.vercel.app',
-'docu-mind-scalable-rag-chatbot-with-pdf-audio-upload-f0d8cvmkh.vercel.app',
+  'docu-mind-scalable-rag-chatbot-with-pdf-audio-upload-f0d8cvmkh.vercel.app',
+  'https://docu-mind-scalable-rag-chatbot-with-zeta.vercel.app',
     'http://localhost:3000'
   ],
   credentials: true,

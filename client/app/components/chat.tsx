@@ -106,7 +106,7 @@ const ChatComponent: React.FC = () => {
               </div>
               <div className="space-y-2 max-w-md">
                 <h2 className="text-2xl font-bold bg-gradient-to-r from-white to-gray-300 bg-clip-text text-transparent">
-                  Hello! I'm your AI Assistant
+                  Hello! I&apos;m your AI Assistant
                 </h2>
                 <p className="text-gray-400 text-sm sm:text-base">
                   Upload PDFs or audio files, then ask me anything about their content

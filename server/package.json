@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "dev": "node --watch index.js",
-    "dev:worker": "node --watch worker.js"
+    "dev:worker": "node --watch worker.js",
+    "dev:pdf": "node --watch pdf-worker.js"
   },
   "keywords": [],
   "author": "",
@@ -25,6 +26,7 @@
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "~4.21.2",
+    "fs-extra": "^11.3.2",
     "langchain": "^0.3.35",
     "multer": "^2.0.2",
     "pdf-parse": "^1.1.1"

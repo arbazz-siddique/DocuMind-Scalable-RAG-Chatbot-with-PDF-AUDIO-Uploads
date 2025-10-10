@@ -7,15 +7,16 @@ import { useAuthToast } from '@/hooks/useAuthToast'
 interface PdfFileStatus {
   filename: string
   status: 'processing' | 'ready' | 'failed'
-  path: string
+  // Remove path since we're using filename now
 }
 
 const FileUploadComponent: React.FC = () => {
-   const [uploadedFile, setUploadedFile] = React.useState<File | null>(null)
+  const [uploadedFile, setUploadedFile] = React.useState<File | null>(null)
   const [isUploading, setIsUploading] = React.useState(false)
   const [isUploaded, setIsUploaded] = React.useState(false)
   const [isProcessing, setIsProcessing] = React.useState(false)
   const { showAuthToast, isSignedIn } = useAuthToast()
+  
   // Get or create session ID
   const getSessionId = () => {
     if (typeof window === 'undefined') return 'default';
@@ -30,7 +31,7 @@ const FileUploadComponent: React.FC = () => {
 
   const sessionId = getSessionId();
 
-  // Poll backend for PDF processing status
+  // Poll backend for PDF processing status - UPDATED
   async function waitUntilProcessed() {
     return new Promise<void>((resolve, reject) => {
       const interval = setInterval(async () => {
@@ -46,10 +47,8 @@ const FileUploadComponent: React.FC = () => {
           const data = await res.json();
           const files: PdfFileStatus[] = data.files || [];
           
-          const currentFile = files.find(f => 
-            f.filename === uploadedFile?.name || 
-            f.path.includes(uploadedFile?.name || '')
-          );
+          // FIXED: Use filename only for matching
+          const currentFile = files.find(f => f.filename === uploadedFile?.name);
 
           if (!currentFile) {
             console.log('PDF file not found in status response');
@@ -92,7 +91,7 @@ const FileUploadComponent: React.FC = () => {
       showAuthToast('upload PDF files')
       return
     }
-   const el = document.createElement('input')
+    const el = document.createElement('input')
     el.setAttribute('type', 'file')
     el.setAttribute('accept', 'application/pdf')
 

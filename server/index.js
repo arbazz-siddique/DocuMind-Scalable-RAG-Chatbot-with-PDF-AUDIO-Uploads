@@ -126,8 +126,20 @@ app.post('/upload/pdf', upload.single('pdf'), async (req, res) => {
 
 app.get('/pdf/status', (req, res) => {
   const sessionId = req.query.sessionId || req.headers['x-session-id'] || 'default';
-  const files = uploadedPdfFiles[sessionId] || [];
-  return res.json({ sessionId, files });
+  let files = uploadedPdfFiles[sessionId] || [];
+  
+  // Ensure consistent response format
+  files = files.map(file => ({
+    filename: file.filename || 'unknown',
+    status: file.status || 'processing',
+    uploadedAt: file.uploadedAt || Date.now(),
+    updatedAt: file.updatedAt || Date.now()
+  }));
+  
+  return res.json({ 
+    sessionId, 
+    files 
+  });
 });
 
 app.post('/pdf/complete', (req, res) => {

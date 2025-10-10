@@ -1,4 +1,3 @@
-// index.js (server)
 import 'dotenv/config';
 import express from "express";
 import cors from "cors";
@@ -10,9 +9,8 @@ import { QdrantVectorStore } from "@langchain/qdrant";
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { ChatPromptTemplate } from "@langchain/core/prompts";
 import IORedis from "ioredis";
-import fs from 'fs';
 
-const connection = new IORedis(process.env.REDIS_URL ,{
+const connection = new IORedis(process.env.REDIS_URL, {
   tls: {}, // required for Upstash (TLS)
 });
 
@@ -31,49 +29,49 @@ const audioCollectionName = 'audio-docs';
 
 // sessionId -> [{ path, filename, status: 'processing'|'ready'|'failed', transcript?: string }]
 const uploadedAudioFiles = {};
-const uploadedPdfFiles ={};
+const uploadedPdfFiles = {};
 
 async function ensureCollections() {
   const config = { size: 768, distance: 'Cosine' };
   for (const col of [pdfCollectionName, audioCollectionName]) {
-    try { await client.getCollection(col); console.log(`Collection '${col}' exists.`); }
-    catch (err) {
-      if (err.status === 404) { await client.createCollection(col, { vectors: config }); console.log(`Collection '${col}' created.`); }
-      else { throw err; }
+    try { 
+      await client.getCollection(col); 
+      console.log(`Collection '${col}' exists.`); 
+    } catch (err) {
+      if (err.status === 404) { 
+        await client.createCollection(col, { vectors: config }); 
+        console.log(`Collection '${col}' created.`); 
+      } else { 
+        throw err; 
+      }
     }
   }
 }
 ensureCollections().catch(console.error);
 
-const uploadDir = './uploads';
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
-
-const storage = multer.diskStorage({
-  destination: (_, file, cb) => cb(null, uploadDir),
-  filename: (_, file, cb) => cb(null, `${Date.now()}-${Math.round(Math.random()*1e9)}-${file.originalname}`)
-});
-
+// Use memory storage instead of disk storage
+const storage = multer.memoryStorage();
 const upload = multer({ 
   storage,
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
   fileFilter: (req, file, cb) => {
-    if (file.mimetype === 'application/pdf') cb(null, true);
-    else cb(new Error('Only PDF files are allowed'));
+    if (file.mimetype === 'application/pdf') {
+      cb(null, true);
+    } else {
+      cb(new Error('Only PDF files are allowed'));
+    }
   }
 });
-
 
 const app = express();
 // allow x-session-id header
 
 const corsOptions = {
   origin: [
-  'https://docu-mind-scalable-rag-chatbot-with-zeta.vercel.app',
-    'http://localhost:3000',
     'https://docu-mind-scalable-rag-chatbot-with.vercel.app',
     'docu-mind-scalable-rag-cha-git-42f7d5-arbazz-siddiques-projects.vercel.app',
-  'docu-mind-scalable-rag-chatbot-with-pdf-audio-upload-f0d8cvmkh.vercel.app',
-  
+    'docu-mind-scalable-rag-chatbot-with-pdf-audio-upload-f0d8cvmkh.vercel.app',
+    'http://localhost:3000'
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -88,22 +86,38 @@ app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
 app.get('/', (_, res) => res.json({status:'running fine.'}));
 
-
-// PDF upload (unchanged)
-app.post('/upload/pdf', upload.single('pdf'), async (req,res) => {
+// PDF upload - UPDATED to use base64
+app.post('/upload/pdf', upload.single('pdf'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No PDF uploaded' });
+    
     const sessionId = req.headers['x-session-id'] || 'default';
-    if (!uploadedPdfFiles[sessionId]) uploadedPdfFiles[sessionId] = [];
+    
+    // Convert file buffer to base64
+    const base64Data = req.file.buffer.toString('base64');
+    
+    // Track PDF uploads by session
+    if (!uploadedPdfFiles[sessionId]) {
+      uploadedPdfFiles[sessionId] = [];
+    }
+    
+    // Store file info without path (since we're using base64)
     uploadedPdfFiles[sessionId].push({
-      path: req.file.path,
       filename: req.file.originalname,
       status: 'processing',
       uploadedAt: Date.now()
     });
-    await pdfQueue.add('file-ready', { filename: req.file.originalname, path: req.file.path, sessionId });
-    res.json({ message: 'PDF uploaded and processing...' });
-  } catch(err) {
+
+    // Send base64 data to queue instead of file path
+    await pdfQueue.add('file-ready', {
+      filename: req.file.originalname,
+      base64Data: base64Data,
+      sessionId: sessionId,
+      mimetype: req.file.mimetype
+    });
+    
+    return res.json({ message: 'PDF uploaded and processing...' });
+  } catch (err) {
     console.error('Upload PDF failed:', err);
     res.status(500).json({ error: err.message });
   }
@@ -117,10 +131,10 @@ app.get('/pdf/status', (req, res) => {
 
 app.post('/pdf/complete', (req, res) => {
   try {
-    const { sessionId = 'default', path, status = 'ready' } = req.body || {};
+    const { sessionId = 'default', filename, status = 'ready' } = req.body || {};
     
-    if (!sessionId || !path) {
-      return res.status(400).json({ error: 'sessionId and path required' });
+    if (!sessionId || !filename) {
+      return res.status(400).json({ error: 'sessionId and filename required' });
     }
     
     // Initialize session array if it doesn't exist
@@ -129,13 +143,12 @@ app.post('/pdf/complete', (req, res) => {
     }
     
     const arr = uploadedPdfFiles[sessionId];
-    const idx = arr.findIndex(f => f.path === path);
+    const idx = arr.findIndex(f => f.filename === filename);
     
     if (idx === -1) {
       // If not found, add it
       arr.push({ 
-        path, 
-        filename: (req.body.filename || path.split('/').pop() || path), 
+        filename, 
         status, 
         updatedAt: Date.now() 
       });
@@ -144,7 +157,7 @@ app.post('/pdf/complete', (req, res) => {
       arr[idx].updatedAt = Date.now();
     }
     
-    console.log(`PDF completion: Session ${sessionId}, File ${path}, Status: ${status}`);
+    console.log(`PDF completion: Session ${sessionId}, File ${filename}, Status: ${status}`);
     return res.json({ ok: true });
   } catch (error) {
     console.error('Error in /pdf/complete:', error);
@@ -152,29 +165,34 @@ app.post('/pdf/complete', (req, res) => {
   }
 });
 
-// Audio upload: register session, mark processing and push job with sessionId
+// Audio upload - ALSO NEEDS TO BE UPDATED similarly
 app.post('/upload/audio', upload.single('audio'), async (req, res) => {
-  const sessionId = req.headers['x-session-id'] || 'default';
-  if (!uploadedAudioFiles[sessionId]) uploadedAudioFiles[sessionId] = [];
+  try {
+    const sessionId = req.headers['x-session-id'] || 'default';
+    if (!uploadedAudioFiles[sessionId]) uploadedAudioFiles[sessionId] = [];
 
-  uploadedAudioFiles[sessionId].push({
-    path: req.file.path,
-    filename: req.file.originalname,
-    status: 'processing',
-    uploadedAt: Date.now()
-  });
+    // Convert audio buffer to base64
+    const base64Data = req.file.buffer.toString('base64');
 
-  // Delay queue job slightly to ensure file is fully written
-  setTimeout(async () => {
+    uploadedAudioFiles[sessionId].push({
+      filename: req.file.originalname,
+      status: 'processing',
+      uploadedAt: Date.now()
+    });
+
+    // Send base64 data to audio queue
     await audioQueue.add('transcribe-ready', {
       filename: req.file.originalname,
-      destination: req.file.destination,
-      path: req.file.path,
-      sessionId
+      base64Data: base64Data,
+      sessionId: sessionId,
+      mimetype: req.file.mimetype
     });
-  }, 1000); // 1 second delay
 
-  res.json({ message: 'Audio uploaded and queued for transcription...', status: 'processing' });
+    res.json({ message: 'Audio uploaded and queued for transcription...', status: 'processing' });
+  } catch (err) {
+    console.error('Upload audio failed:', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Polling endpoint for frontend to see status
@@ -184,13 +202,12 @@ app.get('/audio/status', (req, res) => {
   return res.json({ sessionId, files });
 });
 
-// Endpoint worker calls after transcription is done
 app.post('/audio/complete', (req, res) => {
   try {
-    const { sessionId = 'default', path, transcript, status = 'ready' } = req.body || {};
+    const { sessionId = 'default', filename, transcript, status = 'ready' } = req.body || {};
     
-    if (!sessionId || !path) {
-      return res.status(400).json({ error: 'sessionId and path required' });
+    if (!sessionId || !filename) {
+      return res.status(400).json({ error: 'sessionId and filename required' });
     }
     
     // Initialize session array if it doesn't exist
@@ -199,13 +216,12 @@ app.post('/audio/complete', (req, res) => {
     }
     
     const arr = uploadedAudioFiles[sessionId];
-    const idx = arr.findIndex(f => f.path === path);
+    const idx = arr.findIndex(f => f.filename === filename);
     
     if (idx === -1) {
       // If not found, add it
       arr.push({ 
-        path, 
-        filename: (req.body.filename || path.split('/').pop() || path), 
+        filename, 
         status, 
         transcript, 
         updatedAt: Date.now() 
@@ -222,6 +238,7 @@ app.post('/audio/complete', (req, res) => {
     return res.status(500).json({ error: 'Internal server error' });
   }
 });
+
 
 // Chat endpoint: only uses audio collection if there is at least one 'ready' file
 app.get('/chat', async (req,res) => {

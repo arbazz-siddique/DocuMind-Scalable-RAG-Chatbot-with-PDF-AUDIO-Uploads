@@ -5,10 +5,8 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-     "start": "node index.js",
-    "start:with-workers": "node --env-file=.env index.js & node --env-file=.env worker.js & node --env-file=.env pdf-worker.js",
-    "dev": "node --watch index.js",
-    "dev:with-workers": "concurrently \"node --watch index.js\" \"node --watch worker.js\" \"node --watch pdf-worker.js\""
+    "start": "node cluster.js",
+    "dev": "node --watch cluster.js"
   },
   "keywords": [],
   "author": "",
@@ -24,6 +22,7 @@
     "@langchain/textsplitters": "^0.1.0",
     "@qdrant/js-client-rest": "^1.15.1",
     "bullmq": "^5.61.0",
+    "cluster": "^0.7.7",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "~4.21.2",

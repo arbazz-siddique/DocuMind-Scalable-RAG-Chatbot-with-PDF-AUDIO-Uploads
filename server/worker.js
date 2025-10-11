@@ -42,14 +42,14 @@ async function transcribeWithRetry(audioBlob, maxRetries = 3) {
     const currentModel = models[modelIndex];
     
     try {
-      console.log(`Transcription attempt ${attempt} with model: ${currentModel}`);
+      // console.log(`Transcription attempt ${attempt} with model: ${currentModel}`);
       
       const transcriptionResponse = await hf.automaticSpeechRecognition({
         model: currentModel,
         data: audioBlob,
       });
       
-      console.log("Transcription response received for model:", currentModel);
+      // console.log("Transcription response received for model:", currentModel);
       
       if (transcriptionResponse?.text) {
         return transcriptionResponse;
@@ -63,7 +63,7 @@ async function transcribeWithRetry(audioBlob, maxRetries = 3) {
       
       if (attempt < maxRetries) {
         const delay = Math.pow(2, attempt) * 1000; // Exponential backoff: 2s, 4s, 8s
-        console.log(`Retrying in ${delay/1000}s...`);
+        // console.log(`Retrying in ${delay/1000}s...`);
         await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
@@ -79,7 +79,7 @@ const worker = new Worker(
     try {
       console.log("Audio job received:", job.data);
       const data = typeof job.data === "string" ? JSON.parse(job.data) : job.data;
-      console.log("Parsed data:", data);
+      // console.log("Parsed data:", data);
       const { sessionId, filename, base64Data, mimetype } = data;
 
       if (!base64Data) {
@@ -100,7 +100,7 @@ const worker = new Worker(
         throw new Error(errorMsg);
       }
 
-      console.log("Transcribing:", tempPath);
+      // console.log("Transcribing:", tempPath);
       const audioBlob = new Blob([fileBuffer], { type: mimetype || "audio/mpeg" });
 
       // Use enhanced transcription with retry logic
@@ -112,7 +112,7 @@ const worker = new Worker(
       }
 
       const transcript = transcriptionResponse.text;
-      console.log("Transcription complete (length:", transcript.length, "characters)");
+      // console.log("Transcription complete (length:", transcript.length, "characters)");
 
       // Validate transcript isn't empty
       if (transcript.trim().length === 0) {
@@ -136,12 +136,12 @@ const worker = new Worker(
       });
       
       const splitDocs = await splitter.splitDocuments(docs);
-      console.log(`Split into ${splitDocs.length} chunks.`);
+      // console.log(`Split into ${splitDocs.length} chunks.`);
 
-      console.log('Document metadata:', splitDocs.map(doc => ({
-        contentLength: doc.pageContent.length,
-        metadata: doc.metadata
-      })));
+      // console.log('Document metadata:', splitDocs.map(doc => ({
+      //   contentLength: doc.pageContent.length,
+      //   metadata: doc.metadata
+      // })));
 
       // Initialize Qdrant
       const qClient = new QdrantClient({ 
@@ -175,7 +175,7 @@ const worker = new Worker(
       });
 
       await vectorStore.addDocuments(splitDocs);
-      console.log(`All ${splitDocs.length} chunks added to Qdrant!`);
+      // console.log(`All ${splitDocs.length} chunks added to Qdrant!`);
 
       // notify server that processing is done and attach transcript
       await notifyServerComplete(sessionId, filename, transcript, 'ready');

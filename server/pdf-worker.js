@@ -28,9 +28,9 @@ const worker = new Worker(
   async (job) => {
     let tempPath = null;
     try {
-      console.log("PDF job received:", job.data);
+      // console.log("PDF job received:", job.data);
       const data = typeof job.data === "string" ? JSON.parse(job.data) : job.data;
-      console.log("Parsed PDF data:", data);
+      // console.log("Parsed PDF data:", data);
       const { sessionId, filename, base64Data } = data;
 
       if (!base64Data) {
@@ -46,7 +46,7 @@ const worker = new Worker(
       // 1️⃣ Load PDF document
       const loader = new PDFLoader(tempPath);
       const docs = await loader.load();
-      console.log(`Loaded ${docs.length} pages from PDF`);
+      // console.log(`Loaded ${docs.length} pages from PDF`);
 
       if (docs.length === 0) {
         throw new Error('PDF is empty or could not be read');
@@ -70,12 +70,12 @@ const worker = new Worker(
       });
       
       const splitDocs = await splitter.splitDocuments(docs);
-      console.log(`Split PDF into ${splitDocs.length} chunks.`);
+      // console.log(`Split PDF into ${splitDocs.length} chunks.`);
 
-      console.log('PDF document metadata:', splitDocs.map(doc => ({
-        contentLength: doc.pageContent.length,
-        metadata: doc.metadata
-      })));
+      // console.log('PDF document metadata:', splitDocs.map(doc => ({
+      //   contentLength: doc.pageContent.length,
+      //   metadata: doc.metadata
+      // })));
 
       // 4️⃣ Initialize Qdrant
       const qClient = new QdrantClient({ 
@@ -110,7 +110,7 @@ const worker = new Worker(
       });
 
       await vectorStore.addDocuments(splitDocs);
-      console.log(`All ${splitDocs.length} PDF chunks added to Qdrant!`);
+      // console.log(`All ${splitDocs.length} PDF chunks added to Qdrant!`);
 
       // 6️⃣ Notify server that processing is done
       await notifyServerComplete(sessionId, filename, 'ready');

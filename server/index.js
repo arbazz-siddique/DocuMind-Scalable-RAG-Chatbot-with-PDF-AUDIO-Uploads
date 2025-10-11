@@ -96,12 +96,12 @@ app.post('/upload/pdf', upload.single('pdf'), async (req, res) => {
     
     const sessionId = req.headers['x-session-id'] || 'default';
     
-    console.log('📤 PDF upload received:', {
-      sessionId,
-      originalname: req.file.originalname,
-      size: req.file.size,
-      mimetype: req.file.mimetype
-    });
+    // console.log('📤 PDF upload received:', {
+    //   sessionId,
+    //   originalname: req.file.originalname,
+    //   size: req.file.size,
+    //   mimetype: req.file.mimetype
+    // });
     
     // Convert file buffer to base64
     const base64Data = req.file.buffer.toString('base64');
@@ -120,8 +120,8 @@ app.post('/upload/pdf', upload.single('pdf'), async (req, res) => {
     
     uploadedPdfFiles[sessionId].push(fileInfo);
 
-    console.log('📝 Stored file info for session:', sessionId, fileInfo);
-    console.log('📊 Current files for session:', uploadedPdfFiles[sessionId]);
+    // console.log('📝 Stored file info for session:', sessionId, fileInfo);
+    // console.log('📊 Current files for session:', uploadedPdfFiles[sessionId]);
 
     // Send base64 data to queue instead of file path
     await pdfQueue.add('file-ready', {
@@ -131,7 +131,7 @@ app.post('/upload/pdf', upload.single('pdf'), async (req, res) => {
       mimetype: req.file.mimetype
     });
     
-    console.log('✅ PDF job added to queue');
+    // console.log('✅ PDF job added to queue');
     
     return res.json({ message: 'PDF uploaded and processing...' });
   } catch (err) {
@@ -144,8 +144,8 @@ app.get('/pdf/status', (req, res) => {
   const sessionId = req.query.sessionId || req.headers['x-session-id'] || 'default';
   let files = uploadedPdfFiles[sessionId] || [];
   
-  console.log('📊 Status check for session:', sessionId);
-  console.log('📁 Current files:', files);
+  // console.log('📊 Status check for session:', sessionId);
+  // console.log('📁 Current files:', files);
   
   // Ensure consistent response format
   files = files.map(file => ({
@@ -189,7 +189,7 @@ app.post('/pdf/complete', (req, res) => {
       arr[idx].updatedAt = Date.now();
     }
     
-    console.log(`PDF completion: Session ${sessionId}, File ${filename}, Status: ${status}`);
+    // console.log(`PDF completion: Session ${sessionId}, File ${filename}, Status: ${status}`);
     return res.json({ ok: true });
   } catch (error) {
     console.error('Error in /pdf/complete:', error);
@@ -204,12 +204,12 @@ app.post('/upload/audio', upload.single('audio'), async (req, res) => {
     
     const sessionId = req.headers['x-session-id'] || 'default';
     
-    console.log('📤 Audio upload received:', {
-      sessionId,
-      originalname: req.file.originalname,
-      size: req.file.size,
-      mimetype: req.file.mimetype
-    });
+    // console.log('📤 Audio upload received:', {
+    //   sessionId,
+    //   originalname: req.file.originalname,
+    //   size: req.file.size,
+    //   mimetype: req.file.mimetype
+    // });
     
     // Convert file buffer to base64
     const base64Data = req.file.buffer.toString('base64');
@@ -228,8 +228,8 @@ app.post('/upload/audio', upload.single('audio'), async (req, res) => {
     
     uploadedAudioFiles[sessionId].push(fileInfo);
 
-    console.log('📝 Stored audio file info for session:', sessionId, fileInfo);
-    console.log('📊 Current audio files for session:', uploadedAudioFiles[sessionId]);
+    // console.log('📝 Stored audio file info for session:', sessionId, fileInfo);
+    // console.log('📊 Current audio files for session:', uploadedAudioFiles[sessionId]);
 
     // Send base64 data to queue instead of file path
     await audioQueue.add('transcribe-ready', {
@@ -239,7 +239,7 @@ app.post('/upload/audio', upload.single('audio'), async (req, res) => {
       mimetype: req.file.mimetype
     });
     
-    console.log('✅ Audio job added to queue');
+    // console.log('✅ Audio job added to queue');
     
     return res.json({ message: 'Audio uploaded and processing...', status: 'processing' });
   } catch (err) {
@@ -253,8 +253,8 @@ app.get('/audio/status', (req, res) => {
   const sessionId = req.query.sessionId || req.headers['x-session-id'] || 'default';
   let files = uploadedAudioFiles[sessionId] || [];
   
-  console.log('📊 Audio status check for session:', sessionId);
-  console.log('📁 Current audio files:', files);
+  // console.log('📊 Audio status check for session:', sessionId);
+  // console.log('📁 Current audio files:', files);
   
   // Ensure consistent response format
   files = files.map(file => ({
@@ -280,7 +280,7 @@ app.post('/audio/complete', (req, res) => {
       return res.status(400).json({ error: 'sessionId and filename required' });
     }
     
-    console.log('✅ Audio completion received:', { sessionId, filename, status });
+    // console.log('✅ Audio completion received:', { sessionId, filename, status });
     
     // Initialize session array if it doesn't exist
     if (!uploadedAudioFiles[sessionId]) {
@@ -298,15 +298,15 @@ app.post('/audio/complete', (req, res) => {
         transcript,
         updatedAt: Date.now() 
       });
-      console.log('📝 Added new audio file to tracking:', filename);
+      // console.log('📝 Added new audio file to tracking:', filename);
     } else {
       arr[idx].status = status;
       arr[idx].updatedAt = Date.now();
       if (transcript) arr[idx].transcript = transcript;
-      console.log('📝 Updated audio file status:', filename, '->', status);
+      // console.log('📝 Updated audio file status:', filename, '->', status);
     }
     
-    console.log(`Audio completion: Session ${sessionId}, File ${filename}, Status: ${status}`);
+    // console.log(`Audio completion: Session ${sessionId}, File ${filename}, Status: ${status}`);
     return res.json({ ok: true });
   } catch (error) {
     console.error('Error in /audio/complete:', error);
@@ -322,7 +322,7 @@ app.get('/chat', async (req,res) => {
     const userQuery = req.query.message || '';
     if (!userQuery) return res.status(400).json({ error: 'No query provided' });
 
-    console.log(`Chat request - Session: ${sessionId}, Query: ${userQuery}`);
+    // console.log(`Chat request - Session: ${sessionId}, Query: ${userQuery}`);
 
     const audioFiles = uploadedAudioFiles[sessionId] || [];
     const pdfFiles = uploadedPdfFiles[sessionId] || [];
@@ -331,7 +331,7 @@ app.get('/chat', async (req,res) => {
     const hasReadyPdf = pdfFiles.some(f => f.status === 'ready');
     const hasProcessingAudio = audioFiles.some(f => f.status === 'processing');
 
-    console.log(`Session ${sessionId} - Ready audio: ${hasReadyAudio}, Ready PDF: ${hasReadyPdf}, Processing audio: ${hasProcessingAudio}`);
+    // console.log(`Session ${sessionId} - Ready audio: ${hasReadyAudio}, Ready PDF: ${hasReadyPdf}, Processing audio: ${hasProcessingAudio}`);
 
     // Priority: Audio > PDF
     let collectionName;
@@ -351,9 +351,9 @@ app.get('/chat', async (req,res) => {
         docs: [] 
       });
     }
-    console.log('Audio files:', audioFiles);
-console.log('PDF files:', pdfFiles);
-console.log(`Audio ready: ${hasReadyAudio}, PDF ready: ${hasReadyPdf}`);
+//     console.log('Audio files:', audioFiles);
+// console.log('PDF files:', pdfFiles);
+// console.log(`Audio ready: ${hasReadyAudio}, PDF ready: ${hasReadyPdf}`);
 
     if (hasProcessingAudio && !hasReadyAudio && hasReadyPdf) {
       return res.status(202).json({ 
@@ -408,7 +408,7 @@ console.log(`Audio ready: ${hasReadyAudio}, PDF ready: ${hasReadyPdf}`);
     console.log(`Found ${result.length} relevant documents from ${sourceType}`);
 
     const context = result.map(doc => doc.pageContent).join("\n\n");
-    console.log("Retrieved context length:", context.length);
+    // console.log("Retrieved context length:", context.length);
 
     if (!context || context.trim().length === 0) {
       const message = sourceType === 'audio' 

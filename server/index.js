@@ -74,7 +74,8 @@ const corsOptions = {
     'docu-mind-scalable-rag-cha-git-42f7d5-arbazz-siddiques-projects.vercel.app',
     'docu-mind-scalable-rag-chatbot-with-pdf-audio-upload-f0d8cvmkh.vercel.app',
     'https://docu-mind-scalable-rag-chatbot-with-zeta.vercel.app',
-    'http://localhost:3000'
+    'http://localhost:3000',
+    'https://localhost:3000'
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -316,10 +317,13 @@ app.post('/audio/complete', (req, res) => {
 
 
 // Chat endpoint: only uses audio collection if there is at least one 'ready' file
+
+ // Chat endpoint: search both collections and combine results
 app.get('/chat', async (req,res) => {
   try {
     const sessionId = req.headers['x-session-id'] || req.query.sessionId || 'default';
     const userQuery = req.query.message || '';
+    
     if (!userQuery) return res.status(400).json({ error: 'No query provided' });
 
     console.log(`🔍 Chat request - Session: ${sessionId}, Query: "${userQuery}"`);
@@ -340,163 +344,142 @@ app.get('/chat', async (req,res) => {
       });
     }
 
-    let collectionName;
-    let sourceType;
-    
-    if (hasReadyAudio) {
-      collectionName = audioCollectionName;
-      sourceType = 'audio';
-      console.log('🎵 Using audio collection');
-    } else {
-      collectionName = pdfCollectionName;
-      sourceType = 'pdf';
-      console.log('📄 Using PDF collection');
-    }
-
     const embeddings = new HuggingFaceInferenceEmbeddings({
       apiKey: process.env.HUGGINGFACEHUB_API_TOKEN,
       model: "BAAI/bge-base-en-v1.5",
     });
 
-    const vectorStore = await QdrantVectorStore.fromExistingCollection(embeddings, { client, collectionName });
-    
-    let result;
-    
-    // IMPROVED RETRIEVAL STRATEGY
-    if (sourceType === 'audio') {
-      // For audio, use session filtering with fallback
+    // SIMPLIFIED search function without problematic filters
+    async function searchCollection(collectionName, sessionId, query, k = 6) {
       try {
-        const retriever = vectorStore.asRetriever({ 
-          k: 8, // Increased from 6
-          filter: {
-            must: [
-              {
-                key: "metadata.sessionId",
-                match: { value: sessionId }
-              }
-            ]
-          }
+        const vectorStore = await QdrantVectorStore.fromExistingCollection(embeddings, { 
+          client, 
+          collectionName 
         });
-        result = await retriever.invoke(userQuery);
-      } catch (filterError) {
-        console.log('Audio filter search failed, trying without filter:', filterError.message);
-        const retriever = vectorStore.asRetriever({ k: 8 });
-        result = await retriever.invoke(userQuery);
-        result = result.filter(doc => doc.metadata.sessionId === sessionId);
-      }
-    } else {
-      // For PDFs - IMPROVED SEARCH
-      console.log('🔎 Searching PDF docs with session filter');
-      
-      try {
-        // Try with session filter first
-        const retriever = vectorStore.asRetriever({ 
-          k: 10, // Increased number of chunks
-          filter: {
-            must: [
-              {
-                key: "metadata.sessionId",
-                match: { value: sessionId }
-              }
-            ]
-          }
-        });
-        result = await retriever.invoke(userQuery);
         
-        // If no results with filter, try without filter but still filter afterwards
-        if (result.length === 0) {
-          console.log('No results with session filter, trying broader search');
-          const broaderRetriever = vectorStore.asRetriever({ k: 12 });
-          const broaderResult = await broaderRetriever.invoke(userQuery);
-          result = broaderResult.filter(doc => doc.metadata.sessionId === sessionId);
-        }
+        // Use simple retriever without filters to avoid Bad Request errors
+        const retriever = vectorStore.asRetriever({ k: k * 2 }); // Get more results to filter client-side
+        
+        let result = await retriever.invoke(query);
+        
+        // Filter by sessionId client-side (more reliable)
+        result = result.filter(doc => {
+          // Handle different metadata structures
+          const meta = doc.metadata || {};
+          return meta.sessionId === sessionId;
+        }).slice(0, k); // Take only the top k after filtering
+        
+        // Add source information to each document
+        result.forEach(doc => {
+          doc.metadata = doc.metadata || {};
+          doc.metadata.source = collectionName === pdfCollectionName ? 'pdf' : 'audio';
+        });
+        
+        console.log(`✅ ${collectionName}: Found ${result.length} documents after session filtering`);
+        return result;
       } catch (error) {
-        console.log('Filtered search failed, using unfiltered:', error.message);
-        const retriever = vectorStore.asRetriever({ k: 10 });
-        result = await retriever.invoke(userQuery);
-        result = result.filter(doc => doc.metadata.sessionId === sessionId);
+        console.error(`❌ Error searching collection ${collectionName}:`, error.message);
+        return [];
       }
     }
 
-    console.log(`📚 Found ${result.length} relevant documents from ${sourceType}`);
+    // Search both collections in parallel
+    const [pdfResults, audioResults] = await Promise.all([
+      hasReadyPdf ? searchCollection(pdfCollectionName, sessionId, userQuery, 5) : [],
+      hasReadyAudio ? searchCollection(audioCollectionName, sessionId, userQuery, 3) : []
+    ]);
+
+    console.log(`📚 Final results - PDF: ${pdfResults.length}, Audio: ${audioResults.length}`);
+
+    // DEBUG: Log what we found
+    if (pdfResults.length > 0) {
+      console.log('📄 PDF content samples:');
+      pdfResults.forEach((doc, i) => {
+        console.log(`  ${i+1}. ${doc.pageContent.substring(0, 100)}...`);
+      });
+    }
+    if (audioResults.length > 0) {
+      console.log('🎵 Audio content samples:');
+      audioResults.forEach((doc, i) => {
+        console.log(`  ${i+1}. ${doc.pageContent.substring(0, 100)}...`);
+      });
+    }
 
     // IMPROVED CONTEXT HANDLING
     let context = "";
-    if (result.length > 0) {
-      context = result.map(doc => doc.pageContent).join("\n\n");
-      console.log(`📝 Retrieved context length: ${context.length} characters`);
-    } else {
-      console.log('❌ No relevant documents found for query');
+    
+    if (pdfResults.length > 0 || audioResults.length > 0) {
+      const pdfParts = pdfResults.map(doc => `[FROM PDF DOCUMENT] ${doc.pageContent}`);
+      const audioParts = audioResults.map(doc => `[FROM AUDIO TRANSCRIPT] ${doc.pageContent}`);
       
-      // If no documents found, try to get ALL documents for this session as fallback
-      console.log('🔄 Trying fallback: retrieving all session documents');
-      try {
-        const allRetriever = vectorStore.asRetriever({ k: 20 }); // Get more documents
-        const allResults = await allRetriever.invoke(""); // Empty query returns more random docs
-        const sessionResults = allResults.filter(doc => doc.metadata.sessionId === sessionId);
-        
-        if (sessionResults.length > 0) {
-          context = sessionResults.map(doc => doc.pageContent).join("\n\n");
-          console.log(`🔄 Fallback context: ${context.length} characters from ${sessionResults.length} docs`);
-        }
-      } catch (fallbackError) {
-        console.log('Fallback retrieval failed:', fallbackError.message);
-      }
+      const allParts = [...pdfParts, ...audioParts];
+      context = allParts.join("\n\n---\n\n");
+    }
+
+    console.log(`📝 Final context length: ${context.length} chars`);
+
+    // If no documents found after all attempts
+    if (!context.trim()) {
+      console.log('❌ No relevant content found for this query');
+      return res.json({ 
+        message: "I couldn't find specific information about this topic in your uploaded documents. Try asking about different content or check if your files have been processed successfully.", 
+        docs: [],
+        source: 'none',
+        pdfCount: 0,
+        audioCount: 0
+      });
     }
 
     // IMPROVED PROMPT TEMPLATE
     const llm = new ChatGoogleGenerativeAI({
       model: "gemini-2.0-flash",
       apiKey: process.env.GOOGLE_API_KEY,
-      maxTokens: 2000, // Increased token limit
-      temperature: 0.1, // Lower temperature for more consistent answers
+      maxTokens: 2000,
+      temperature: 0.1,
     });
 
-    const promptTemplate = sourceType === 'audio'
-      ? `You are a helpful assistant that answers questions based on audio transcripts. Use the following context from the user's audio files to answer their question.
+    const promptTemplate = `You are a helpful assistant that answers questions based on the user's uploaded documents and audio files.
 
-IMPORTANT INSTRUCTIONS:
-- Be specific and reference the content directly when possible
-- If the context doesn't contain the exact answer, make reasonable inferences based on the available information
-- If you really cannot find any relevant information, say "Based on the audio transcripts, I cannot find specific information about [the topic]"
-- Don't make up information that isn't in the context
-
-Context from audio transcripts:
+CONTEXT FROM USER'S UPLOADED FILES:
 {context}
 
-User Question: {question}
+USER QUESTION: {question}
 
-Provide a helpful and accurate answer based on the audio context:`
-      : `You are a helpful assistant that answers questions based on PDF documents. Use the following context from the user's PDF files to answer their question.
+IMPORTANT GUIDELINES:
+- Answer using ONLY the information provided in the context above
+- If the context contains PDF content, focus on that for PDF-related questions
+- If the context contains audio transcripts, focus on that for audio-related questions  
+- If both are present, use the most relevant source for the question
+- Clearly indicate if information comes from PDF documents or audio transcripts
+- If you cannot answer based on the context, say so clearly
 
-CRITICAL INSTRUCTIONS:
-1. Answer the question based ONLY on the provided context
-2. If the context contains relevant information, provide a detailed answer
-3. If the context doesn't have the exact answer but has related information, say what you CAN find and make reasonable connections
-4. If you truly cannot find ANY relevant information, say: "The PDF doesn't contain specific information about [the exact topic], but I can tell you about [related topics found in context]"
-5. NEVER say "I couldn't find relevant information" without offering alternatives
-6. For summary requests, provide a comprehensive summary of ALL available content
-
-Context from PDF:
-{context}
-
-User Question: {question}
-
-Provide a comprehensive answer based on the PDF content:`;
+Answer the user's question based on the context:`;
 
     const prompt = ChatPromptTemplate.fromTemplate(promptTemplate);
     const chain = prompt.pipe(llm);
 
     console.log('🤖 Generating response with LLM...');
     const chatResult = await chain.invoke({ 
-      context: context || "No specific content available from the document.", 
+      context: context,
       question: userQuery 
     });
     
+    // Determine source type for response
+    let sourceType = 'none';
+    if (pdfResults.length > 0 && audioResults.length > 0) {
+      sourceType = 'both';
+    } else if (pdfResults.length > 0) {
+      sourceType = 'pdf';
+    } else if (audioResults.length > 0) {
+      sourceType = 'audio';
+    }
+    
     return res.json({ 
       message: chatResult.content, 
-      docs: result,
+      docs: [...pdfResults, ...audioResults],
       source: sourceType,
+      pdfCount: pdfResults.length,
+      audioCount: audioResults.length,
       contextLength: context.length
     });
 
@@ -506,59 +489,5 @@ Provide a comprehensive answer based on the PDF content:`;
   }
 });
 
-
-app.get('/debug/session-content', async (req, res) => {
-  try {
-    const sessionId = req.query.sessionId || req.headers['x-session-id'] || 'default';
-    
-    const embeddings = new HuggingFaceInferenceEmbeddings({
-      apiKey: process.env.HUGGINGFACEHUB_API_TOKEN,
-      model: "BAAI/bge-base-en-v1.5",
-    });
-
-    // Check PDF collection
-    const pdfVectorStore = await QdrantVectorStore.fromExistingCollection(embeddings, { 
-      client, 
-      collectionName: pdfCollectionName 
-    });
-    
-    const pdfRetriever = pdfVectorStore.asRetriever({ k: 50 });
-    const allPdfDocs = await pdfRetriever.invoke("");
-    const sessionPdfDocs = allPdfDocs.filter(doc => doc.metadata.sessionId === sessionId);
-    
-    // Check Audio collection
-    const audioVectorStore = await QdrantVectorStore.fromExistingCollection(embeddings, { 
-      client, 
-      collectionName: audioCollectionName 
-    });
-    
-    const audioRetriever = audioVectorStore.asRetriever({ k: 50 });
-    const allAudioDocs = await audioRetriever.invoke("");
-    const sessionAudioDocs = allAudioDocs.filter(doc => doc.metadata.sessionId === sessionId);
-
-    res.json({
-      sessionId,
-      pdf: {
-        totalDocuments: sessionPdfDocs.length,
-        documents: sessionPdfDocs.map(doc => ({
-          contentPreview: doc.pageContent.substring(0, 200) + '...',
-          metadata: doc.metadata,
-          contentLength: doc.pageContent.length
-        }))
-      },
-      audio: {
-        totalDocuments: sessionAudioDocs.length,
-        documents: sessionAudioDocs.map(doc => ({
-          contentPreview: doc.pageContent.substring(0, 200) + '...',
-          metadata: doc.metadata,
-          contentLength: doc.pageContent.length
-        }))
-      }
-    });
-  } catch (error) {
-    console.error('Debug endpoint failed:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
 
 app.listen(8000, ()=> console.log(`Server started on port 8000`));

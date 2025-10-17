@@ -1,18 +1,14 @@
-// worker.js - UPDATED for base64
+// worker.js - FIXED with proper Hugging Face API usage
 import { Worker } from "bullmq";
 import { HuggingFaceInferenceEmbeddings } from "@langchain/community/embeddings/hf";
 import { QdrantVectorStore } from "@langchain/qdrant";
 import { CharacterTextSplitter } from "@langchain/textsplitters";
 import { QdrantClient } from "@qdrant/js-client-rest";
-import { InferenceClient } from "@huggingface/inference";
 import { writeFile, unlink } from "fs/promises";
 import { Blob } from "buffer";
 import 'dotenv/config';
 
-// HF client
-const hf = new InferenceClient(process.env.HUGGINGFACEHUB_AUDIO_KEY);
-
-// helper to notify server - UPDATED
+// Helper to notify server
 async function notifyServerComplete(sessionId, filename, transcript, status = 'ready') {
   const serverUrl = process.env.SERVER_URL;
   try {
@@ -27,43 +23,57 @@ async function notifyServerComplete(sessionId, filename, transcript, status = 'r
   }
 }
 
-// Enhanced transcription function with multiple model fallbacks
-async function transcribeWithRetry(audioBlob, maxRetries = 3) {
-  const models = [
-    "openai/whisper-large-v3",  // Primary model
-    "openai/whisper-large-v2",  // Fallback 1
-    "openai/whisper-base",      // Fallback 2
-  ];
+// Enhanced transcription function using direct API calls
+async function transcribeAudio(audioBlob, maxRetries = 3) {
+  const API_URL = "https://api-inference.huggingface.co/models/openai/whisper-large-v3";
+  const headers = {
+    "Authorization": `Bearer ${process.env.HUGGINGFACEHUB_AUDIO_KEY}`,
+    "Content-Type": "audio/mpeg"
+  };
 
   let lastError;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    const modelIndex = Math.min(attempt - 1, models.length - 1);
-    const currentModel = models[modelIndex];
-    
     try {
-      // console.log(`Transcription attempt ${attempt} with model: ${currentModel}`);
+      console.log(`🎧 Transcribing attempt ${attempt} with Whisper large v3`);
       
-      const transcriptionResponse = await hf.automaticSpeechRecognition({
-        model: currentModel,
-        data: audioBlob,
+      const response = await fetch(API_URL, {
+        method: "POST",
+        headers: headers,
+        body: audioBlob,
       });
+
+      if (!response.ok) {
+        if (response.status === 503) {
+          // Model is loading, wait and retry
+          const result = await response.json();
+          const waitTime = result.estimated_time || 10;
+          console.log(`Model loading, waiting ${waitTime}s...`);
+          await new Promise(resolve => setTimeout(resolve, waitTime * 1000));
+          continue;
+        }
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
       
-      // console.log("Transcription response received for model:", currentModel);
-      
-      if (transcriptionResponse?.text) {
-        return transcriptionResponse;
+      if (result.error) {
+        throw new Error(result.error);
+      }
+
+      if (result.text) {
+        return { text: result.text };
       } else {
         throw new Error('Transcription returned empty text');
       }
       
     } catch (error) {
       lastError = error;
-      console.warn(`Attempt ${attempt} with model ${currentModel} failed:`, error.message);
+      console.warn(`Attempt ${attempt} failed:`, error.message);
       
       if (attempt < maxRetries) {
-        const delay = Math.pow(2, attempt) * 1000; // Exponential backoff: 2s, 4s, 8s
-        // console.log(`Retrying in ${delay/1000}s...`);
+        const delay = Math.pow(2, attempt) * 1000;
+        console.log(`Retrying in ${delay/1000}s...`);
         await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
@@ -79,7 +89,6 @@ const worker = new Worker(
     try {
       console.log("Audio job received:", job.data);
       const data = typeof job.data === "string" ? JSON.parse(job.data) : job.data;
-      // console.log("Parsed data:", data);
       const { sessionId, filename, base64Data, mimetype } = data;
 
       if (!base64Data) {
@@ -92,34 +101,34 @@ const worker = new Worker(
       await writeFile(tempPath, fileBuffer);
       console.log("Saved audio to temporary file:", tempPath);
 
-      // Check file size (Hugging Face has limits)
+      // Check file size
       const fileSizeMB = fileBuffer.length / (1024 * 1024);
       if (fileSizeMB > 50) {
-        const errorMsg = `File too large (${fileSizeMB.toFixed(2)}MB). Maximum size is 50MB. Please use a smaller file.`;
+        const errorMsg = `File too large (${fileSizeMB.toFixed(2)}MB). Maximum size is 50MB.`;
         await notifyServerComplete(sessionId, filename, null, 'failed');
         throw new Error(errorMsg);
       }
 
-      // console.log("Transcribing:", tempPath);
+      console.log("Transcribing:", tempPath);
       const audioBlob = new Blob([fileBuffer], { type: mimetype || "audio/mpeg" });
 
-      // Use enhanced transcription with retry logic
-      const transcriptionResponse = await transcribeWithRetry(audioBlob, 3);
+      // Use enhanced transcription
+      const transcriptionResponse = await transcribeAudio(audioBlob, 3);
 
       if (!transcriptionResponse || !transcriptionResponse.text) {
         await notifyServerComplete(sessionId, filename, null, 'failed');
-        throw new Error(`Transcription failed: ${JSON.stringify(transcriptionResponse)}`);
+        throw new Error('Transcription failed: No text returned');
       }
 
       const transcript = transcriptionResponse.text;
-      // console.log("Transcription complete (length:", transcript.length, "characters)");
+      console.log("Transcription complete (length:", transcript.length, "characters)");
 
       // Validate transcript isn't empty
       if (transcript.trim().length === 0) {
         throw new Error('Transcription returned empty content');
       }
 
-      // split and add to Qdrant
+      // Split and add to Qdrant
       const docs = [{ 
         pageContent: transcript, 
         metadata: { 
@@ -136,12 +145,7 @@ const worker = new Worker(
       });
       
       const splitDocs = await splitter.splitDocuments(docs);
-      // console.log(`Split into ${splitDocs.length} chunks.`);
-
-      // console.log('Document metadata:', splitDocs.map(doc => ({
-      //   contentLength: doc.pageContent.length,
-      //   metadata: doc.metadata
-      // })));
+      console.log(`Split into ${splitDocs.length} chunks.`);
 
       // Initialize Qdrant
       const qClient = new QdrantClient({ 
@@ -175,9 +179,9 @@ const worker = new Worker(
       });
 
       await vectorStore.addDocuments(splitDocs);
-      // console.log(`All ${splitDocs.length} chunks added to Qdrant!`);
+      console.log(`All ${splitDocs.length} chunks added to Qdrant!`);
 
-      // notify server that processing is done and attach transcript
+      // Notify server that processing is done
       await notifyServerComplete(sessionId, filename, transcript, 'ready');
 
     } catch (error) {
@@ -194,7 +198,7 @@ const worker = new Worker(
         }
       }
       
-      throw error; // let BullMQ handle retries
+      throw error;
     } finally {
       // Clean up temporary file
       if (tempPath) {

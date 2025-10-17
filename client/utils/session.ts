@@ -1,3 +1,4 @@
+'use client';
 // utils/session.ts
 
 /**

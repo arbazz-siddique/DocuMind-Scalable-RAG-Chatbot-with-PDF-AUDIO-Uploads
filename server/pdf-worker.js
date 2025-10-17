@@ -65,9 +65,8 @@ const worker = new Worker(
 
       // 3️⃣ Split documents into chunks
       const splitter = new CharacterTextSplitter({ 
-        chunkSize: 800, 
-        chunkOverlap: 150 ,
-        separator: "\n", 
+        chunkSize: 1000, 
+        chunkOverlap: 200 
       });
       
       const splitDocs = await splitter.splitDocuments(docs);
@@ -77,22 +76,6 @@ const worker = new Worker(
       //   contentLength: doc.pageContent.length,
       //   metadata: doc.metadata
       // })));
-      splitDocs.forEach((doc, index) => {
-  doc.metadata = {
-    ...doc.metadata,
-    source: filename,
-    type: 'pdf',
-    sessionId: sessionId,
-    processedAt: new Date().toISOString(),
-    chunkIndex: index,
-    totalChunks: splitDocs.length,
-    // Add content type hints
-    contentType: doc.pageContent.includes('Experience') ? 'experience' :
-                doc.pageContent.includes('Education') ? 'education' :
-                doc.pageContent.includes('Skill') ? 'skills' : 'general'
-  };
-});
-
 
       // 4️⃣ Initialize Qdrant
       const qClient = new QdrantClient({ 

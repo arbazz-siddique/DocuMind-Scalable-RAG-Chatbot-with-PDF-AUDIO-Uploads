@@ -3,6 +3,7 @@ import { Upload, CheckCircle, XCircle, Loader2, FileText } from 'lucide-react'
 import * as React from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useAuthToast } from '@/hooks/useAuthToast'
+import sessionManager from '@/utils/session';
 
 interface PdfFileStatus {
   filename: string
@@ -17,18 +18,9 @@ const FileUploadComponent: React.FC = () => {
   const { showAuthToast, isSignedIn } = useAuthToast()
   
   // Get or create session ID
-  const getSessionId = () => {
-    if (typeof window === 'undefined') return 'default';
-    
-    let sessionId = localStorage.getItem('sessionId');
-    if (!sessionId) {
-      sessionId = crypto.randomUUID();
-      localStorage.setItem('sessionId', sessionId);
-    }
-    return sessionId;
-  };
+  
 
-  const sessionId = getSessionId();
+  const sessionId = sessionManager.getSessionId();
 
   // Poll backend for PDF processing status - FIXED: Accept filename as parameter
   async function waitUntilProcessed(filename: string) {

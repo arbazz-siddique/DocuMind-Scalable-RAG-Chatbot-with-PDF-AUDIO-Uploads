@@ -3,7 +3,7 @@ import { Send, User, Bot, Loader2, Paperclip, Mic } from 'lucide-react'
 import * as React from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useAuthToast } from '@/hooks/useAuthToast'
-
+import sessionManager from '@/utils/session';
 interface Message {
   role: 'user' | 'bot'
   content: string
@@ -39,7 +39,7 @@ const ChatComponent: React.FC = () => {
     setIsLoading(true)
 
     try  {
-      const sessionId = localStorage.getItem('sessionId') || 'default';
+      const sessionId = sessionManager.getSessionId();
       const response = await fetch(`${process.env.NEXT_PUBLIC_SERVER_URL}/chat?message=${encodeURIComponent(input)}`, {
         method: 'GET',
         headers: {

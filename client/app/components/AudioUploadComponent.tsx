@@ -3,6 +3,7 @@ import { Mic, CheckCircle, XCircle, Loader2, AlertCircle, Volume2 } from 'lucide
 import * as React from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useAuthToast } from '@/hooks/useAuthToast'
+import sessionManager from '@/utils/session';
 
 interface AudioFileStatus {
   filename: string
@@ -21,18 +22,9 @@ const AudioUploadComponent: React.FC = () => {
   const { showAuthToast, isSignedIn } = useAuthToast()
 
   // Get or create session ID
-  const getSessionId = () => {
-    if (typeof window === 'undefined') return 'default';
-    
-    let sessionId = localStorage.getItem('sessionId');
-    if (!sessionId) {
-      sessionId = crypto.randomUUID();
-      localStorage.setItem('sessionId', sessionId);
-    }
-    return sessionId;
-  };
+ 
 
-  const sessionId = getSessionId();
+  const sessionId = sessionManager.getSessionId();
 
   // Poll backend for transcription status - FIXED
   async function waitUntilProcessed(filename: string) {

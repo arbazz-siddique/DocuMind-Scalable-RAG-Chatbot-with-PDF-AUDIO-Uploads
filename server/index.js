@@ -322,48 +322,36 @@ app.get('/chat', async (req,res) => {
     const userQuery = req.query.message || '';
     if (!userQuery) return res.status(400).json({ error: 'No query provided' });
 
-    // console.log(`Chat request - Session: ${sessionId}, Query: ${userQuery}`);
+    console.log(`🔍 Chat request - Session: ${sessionId}, Query: "${userQuery}"`);
 
     const audioFiles = uploadedAudioFiles[sessionId] || [];
     const pdfFiles = uploadedPdfFiles[sessionId] || [];
     
     const hasReadyAudio = audioFiles.some(f => f.status === 'ready');
     const hasReadyPdf = pdfFiles.some(f => f.status === 'ready');
-    const hasProcessingAudio = audioFiles.some(f => f.status === 'processing');
 
-    // console.log(`Session ${sessionId} - Ready audio: ${hasReadyAudio}, Ready PDF: ${hasReadyPdf}, Processing audio: ${hasProcessingAudio}`);
+    console.log(`📊 Session ${sessionId} - Ready audio: ${hasReadyAudio}, Ready PDF: ${hasReadyPdf}`);
 
-    // Priority: Audio > PDF
+    // If no documents, return early
+    if (!hasReadyAudio && !hasReadyPdf) {
+      return res.json({ 
+        message: "I don't have any documents to search. Please upload a PDF or audio file first!", 
+        docs: [] 
+      });
+    }
+
     let collectionName;
     let sourceType;
     
     if (hasReadyAudio) {
       collectionName = audioCollectionName;
       sourceType = 'audio';
-      console.log('Using audio collection');
-    } else if (hasReadyPdf) {
+      console.log('🎵 Using audio collection');
+    } else {
       collectionName = pdfCollectionName;
       sourceType = 'pdf';
-      console.log('Using PDF collection');
-    } else {
-      return res.json({ 
-        message: "I don't have any documents to search. Please upload a PDF or audio file first!", 
-        docs: [] 
-      });
+      console.log('📄 Using PDF collection');
     }
-//     console.log('Audio files:', audioFiles);
-// console.log('PDF files:', pdfFiles);
-// console.log(`Audio ready: ${hasReadyAudio}, PDF ready: ${hasReadyPdf}`);
-
-    if (hasProcessingAudio && !hasReadyAudio && hasReadyPdf) {
-      return res.status(202).json({ 
-        message: 'Your audio is still being processed. Meanwhile, I can answer questions based on your PDF files.',
-        processing: true,
-        docs: []
-      });
-    }
-
-    console.log(`Selected collection: ${collectionName} (${sourceType}) for session: ${sessionId}`);
 
     const embeddings = new HuggingFaceInferenceEmbeddings({
       apiKey: process.env.HUGGINGFACEHUB_API_TOKEN,
@@ -373,12 +361,13 @@ app.get('/chat', async (req,res) => {
     const vectorStore = await QdrantVectorStore.fromExistingCollection(embeddings, { client, collectionName });
     
     let result;
+    
+    // IMPROVED RETRIEVAL STRATEGY
     if (sourceType === 'audio') {
-      // For audio, use session filtering
-      console.log(`Searching audio docs for session: ${sessionId}`);
+      // For audio, use session filtering with fallback
       try {
         const retriever = vectorStore.asRetriever({ 
-          k: 6,
+          k: 8, // Increased from 6
           filter: {
             must: [
               {
@@ -391,71 +380,128 @@ app.get('/chat', async (req,res) => {
         result = await retriever.invoke(userQuery);
       } catch (filterError) {
         console.log('Audio filter search failed, trying without filter:', filterError.message);
-        const retriever = vectorStore.asRetriever({ k: 6 });
+        const retriever = vectorStore.asRetriever({ k: 8 });
         result = await retriever.invoke(userQuery);
         result = result.filter(doc => doc.metadata.sessionId === sessionId);
       }
     } else {
-      // For PDFs, search all documents in pdf-docs collection
-      console.log('Searching PDF docs');
-      const retriever = vectorStore.asRetriever({ k: 6 });
-      result = await retriever.invoke(userQuery);
+      // For PDFs - IMPROVED SEARCH
+      console.log('🔎 Searching PDF docs with session filter');
       
-      // Optional: Filter PDF results by session if needed
-      result = result.filter(doc => doc.metadata.sessionId === sessionId);
+      try {
+        // Try with session filter first
+        const retriever = vectorStore.asRetriever({ 
+          k: 10, // Increased number of chunks
+          filter: {
+            must: [
+              {
+                key: "metadata.sessionId",
+                match: { value: sessionId }
+              }
+            ]
+          }
+        });
+        result = await retriever.invoke(userQuery);
+        
+        // If no results with filter, try without filter but still filter afterwards
+        if (result.length === 0) {
+          console.log('No results with session filter, trying broader search');
+          const broaderRetriever = vectorStore.asRetriever({ k: 12 });
+          const broaderResult = await broaderRetriever.invoke(userQuery);
+          result = broaderResult.filter(doc => doc.metadata.sessionId === sessionId);
+        }
+      } catch (error) {
+        console.log('Filtered search failed, using unfiltered:', error.message);
+        const retriever = vectorStore.asRetriever({ k: 10 });
+        result = await retriever.invoke(userQuery);
+        result = result.filter(doc => doc.metadata.sessionId === sessionId);
+      }
     }
 
-    console.log(`Found ${result.length} relevant documents from ${sourceType}`);
+    console.log(`📚 Found ${result.length} relevant documents from ${sourceType}`);
 
-    const context = result.map(doc => doc.pageContent).join("\n\n");
-    // console.log("Retrieved context length:", context.length);
-
-    if (!context || context.trim().length === 0) {
-      const message = sourceType === 'audio' 
-        ? "I couldn't find relevant information in your audio files. Try asking about different topics from your uploaded audio." 
-        : "I couldn't find relevant information in your PDF documents. Try asking about different topics from your uploaded PDFs.";
-      return res.json({ message, docs: [] });
+    // IMPROVED CONTEXT HANDLING
+    let context = "";
+    if (result.length > 0) {
+      context = result.map(doc => doc.pageContent).join("\n\n");
+      console.log(`📝 Retrieved context length: ${context.length} characters`);
+    } else {
+      console.log('❌ No relevant documents found for query');
+      
+      // If no documents found, try to get ALL documents for this session as fallback
+      console.log('🔄 Trying fallback: retrieving all session documents');
+      try {
+        const allRetriever = vectorStore.asRetriever({ k: 20 }); // Get more documents
+        const allResults = await allRetriever.invoke(""); // Empty query returns more random docs
+        const sessionResults = allResults.filter(doc => doc.metadata.sessionId === sessionId);
+        
+        if (sessionResults.length > 0) {
+          context = sessionResults.map(doc => doc.pageContent).join("\n\n");
+          console.log(`🔄 Fallback context: ${context.length} characters from ${sessionResults.length} docs`);
+        }
+      } catch (fallbackError) {
+        console.log('Fallback retrieval failed:', fallbackError.message);
+      }
     }
 
+    // IMPROVED PROMPT TEMPLATE
     const llm = new ChatGoogleGenerativeAI({
       model: "gemini-2.0-flash",
       apiKey: process.env.GOOGLE_API_KEY,
-      maxTokens: 1500,
-      temperature: 0.3,
+      maxTokens: 2000, // Increased token limit
+      temperature: 0.1, // Lower temperature for more consistent answers
     });
 
     const promptTemplate = sourceType === 'audio'
-      ? `You are a helpful assistant that answers questions based on audio transcripts. Use the following context from the user's audio files to answer their question. Be specific and reference the content directly when possible.
+      ? `You are a helpful assistant that answers questions based on audio transcripts. Use the following context from the user's audio files to answer their question.
+
+IMPORTANT INSTRUCTIONS:
+- Be specific and reference the content directly when possible
+- If the context doesn't contain the exact answer, make reasonable inferences based on the available information
+- If you really cannot find any relevant information, say "Based on the audio transcripts, I cannot find specific information about [the topic]"
+- Don't make up information that isn't in the context
 
 Context from audio transcripts:
 {context}
 
 User Question: {question}
 
-Provide a helpful answer based only on the audio context above:`
-      : `You are a helpful assistant that answers questions based on PDF documents. Use the following context to answer the user's question.
+Provide a helpful and accurate answer based on the audio context:`
+      : `You are a helpful assistant that answers questions based on PDF documents. Use the following context from the user's PDF files to answer their question.
+
+CRITICAL INSTRUCTIONS:
+1. Answer the question based ONLY on the provided context
+2. If the context contains relevant information, provide a detailed answer
+3. If the context doesn't have the exact answer but has related information, say what you CAN find and make reasonable connections
+4. If you truly cannot find ANY relevant information, say: "The PDF doesn't contain specific information about [the exact topic], but I can tell you about [related topics found in context]"
+5. NEVER say "I couldn't find relevant information" without offering alternatives
+6. For summary requests, provide a comprehensive summary of ALL available content
 
 Context from PDF:
 {context}
 
 User Question: {question}
 
-Answer:`;
+Provide a comprehensive answer based on the PDF content:`;
 
     const prompt = ChatPromptTemplate.fromTemplate(promptTemplate);
     const chain = prompt.pipe(llm);
 
-    const chatResult = await chain.invoke({ context, question: userQuery });
+    console.log('🤖 Generating response with LLM...');
+    const chatResult = await chain.invoke({ 
+      context: context || "No specific content available from the document.", 
+      question: userQuery 
+    });
+    
     return res.json({ 
       message: chatResult.content, 
       docs: result,
-      source: sourceType
+      source: sourceType,
+      contextLength: context.length
     });
 
   } catch (error) {
-    console.error("Chat endpoint failed:", error.message);
+    console.error("💥 Chat endpoint failed:", error.message);
     return res.status(500).json({ error: error.message });
   }
 });
-
-app.listen(8000, ()=> console.log(`Server started on port 8000`));
